@@ -8,6 +8,16 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "fs:default"
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-read-dir",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$APPDATA/**",
+        "$APPLOCALDATA/**",
+        "$HOME/.beatrice/**"
+      ]
+    }
   ]
 }

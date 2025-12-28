@@ -38,6 +38,9 @@ pub fn run() {
             // Add database to managed state
             app.manage(db);
 
+            // Add recorder state
+            app.manage(commands::RecorderState::default());
+
             log::info!("Beatrice initialized successfully");
             Ok(())
         })
@@ -68,6 +71,10 @@ pub fn run() {
             commands::get_theme,
             commands::list_theme_names,
             commands::render_preview,
+            commands::start_recording,
+            commands::stop_recording,
+            commands::is_recording,
+            commands::get_recording_level,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -893,3 +893,55 @@ fn samples_to_wav(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>, Box<dyn 
 
     Ok(cursor.into_inner())
 }
+
+// ==================== RECORDING COMMANDS ====================
+
+use crate::audio::AudioRecorder;
+
+/// Global recorder state managed by Tauri
+pub struct RecorderState(pub AudioRecorder);
+
+impl Default for RecorderState {
+    fn default() -> Self {
+        Self(AudioRecorder::new())
+    }
+}
+
+/// Start audio recording from the default input device
+#[tauri::command]
+pub fn start_recording(recorder: State<'_, RecorderState>) -> CommandResult<()> {
+    recorder.0.start().map_err(|e| CommandError {
+        message: format!("Failed to start recording: {}", e),
+    })?;
+
+    log::info!("Recording started");
+    Ok(())
+}
+
+/// Stop recording and return the audio data as WAV bytes
+#[tauri::command]
+pub fn stop_recording(recorder: State<'_, RecorderState>) -> CommandResult<Vec<u8>> {
+    let data = recorder.0.stop().map_err(|e| CommandError {
+        message: format!("Failed to stop recording: {}", e),
+    })?;
+
+    log::info!("Recording stopped: {} samples, {} ms", data.samples.len(), data.duration_ms());
+
+    let wav_bytes = data.to_wav().map_err(|e| CommandError {
+        message: format!("Failed to convert to WAV: {}", e),
+    })?;
+
+    Ok(wav_bytes)
+}
+
+/// Check if currently recording
+#[tauri::command]
+pub fn is_recording(recorder: State<'_, RecorderState>) -> CommandResult<bool> {
+    Ok(recorder.0.is_recording())
+}
+
+/// Get current audio input level (0.0 - 1.0)
+#[tauri::command]
+pub fn get_recording_level(recorder: State<'_, RecorderState>) -> CommandResult<f32> {
+    Ok(recorder.0.get_level())
+}

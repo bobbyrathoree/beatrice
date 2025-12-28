@@ -1,10 +1,11 @@
 import { useState, useRef, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface AudioRecorderState {
   isRecording: boolean;
   isPaused: boolean;
   duration: number;
-  audioData: Blob | null;
+  audioData: Uint8Array | null;
   error: string | null;
 }
 
@@ -27,86 +28,21 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     error: null,
   });
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const startTimeRef = useRef<number>(0);
-  const pausedTimeRef = useRef<number>(0);
   const timerRef = useRef<number | null>(null);
+  const levelRef = useRef<number>(0);
+  const levelIntervalRef = useRef<number | null>(null);
 
   const startRecording = useCallback(async () => {
     try {
-      // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        }
-      });
-      streamRef.current = stream;
-
-      // Create audio context for visualization
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      // Setup MediaRecorder
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm';
-
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType,
-        audioBitsPerSecond: 128000,
-      });
-
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(audioChunksRef.current, { type: mimeType });
-
-        setState((prev) => ({
-          ...prev,
-          isRecording: false,
-          isPaused: false,
-          audioData: blob,
-        }));
-
-        // Cleanup
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-        }
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-        }
-        if (audioContextRef.current) {
-          audioContextRef.current.close();
-        }
-      };
-
-      mediaRecorder.start(100); // Collect data every 100ms
-      mediaRecorderRef.current = mediaRecorder;
+      // Call Rust backend to start recording
+      await invoke('start_recording');
 
       // Start timer
       startTimeRef.current = Date.now();
-      pausedTimeRef.current = 0;
 
-      timerRef.current = setInterval(() => {
-        const elapsed = Date.now() - startTimeRef.current - pausedTimeRef.current;
+      timerRef.current = window.setInterval(() => {
+        const elapsed = Date.now() - startTimeRef.current;
 
         setState((prev) => ({
           ...prev,
@@ -119,6 +55,16 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         }
       }, 50);
 
+      // Poll audio level from Rust
+      levelIntervalRef.current = window.setInterval(async () => {
+        try {
+          const level = await invoke<number>('get_recording_level');
+          levelRef.current = level;
+        } catch {
+          // Ignore level polling errors
+        }
+      }, 100);
+
       setState({
         isRecording: true,
         isPaused: false,
@@ -127,7 +73,17 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         error: null,
       });
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to start recording';
+      // Handle various error formats from Tauri
+      let errorMessage: string;
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        errorMessage = (err as { message: string }).message;
+      } else {
+        errorMessage = 'Unknown error occurred';
+      }
       setState((prev) => ({
         ...prev,
         error: errorMessage,
@@ -137,39 +93,65 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   }, []);
 
   const stopRecording = useCallback(async () => {
-    if (mediaRecorderRef.current && state.isRecording) {
-      mediaRecorderRef.current.stop();
+    if (!state.isRecording) return;
+
+    try {
+      // Stop timers
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      if (levelIntervalRef.current) {
+        clearInterval(levelIntervalRef.current);
+        levelIntervalRef.current = null;
+      }
+
+      // Call Rust backend to stop recording and get WAV data
+      const wavBytes = await invoke<number[]>('stop_recording');
+
+      // Convert number array to Uint8Array
+      const audioData = new Uint8Array(wavBytes);
+
+      setState((prev) => ({
+        ...prev,
+        isRecording: false,
+        isPaused: false,
+        audioData,
+      }));
+    } catch (err) {
+      // Handle various error formats from Tauri
+      let errorMessage: string;
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        errorMessage = (err as { message: string }).message;
+      } else {
+        errorMessage = 'Unknown error occurred';
+      }
+      setState((prev) => ({
+        ...prev,
+        isRecording: false,
+        error: errorMessage,
+      }));
+      console.error('Error stopping recording:', err);
     }
   }, [state.isRecording]);
 
   const pauseRecording = useCallback(() => {
-    if (mediaRecorderRef.current && state.isRecording && !state.isPaused) {
-      mediaRecorderRef.current.pause();
-      pausedTimeRef.current = Date.now() - startTimeRef.current - pausedTimeRef.current;
-      setState((prev) => ({ ...prev, isPaused: true }));
-    }
-  }, [state.isRecording, state.isPaused]);
+    // Pause not implemented in Rust backend yet
+    // Could be added if needed
+    console.warn('Pause not implemented for native recording');
+  }, []);
 
   const resumeRecording = useCallback(() => {
-    if (mediaRecorderRef.current && state.isRecording && state.isPaused) {
-      mediaRecorderRef.current.resume();
-      startTimeRef.current = Date.now() - pausedTimeRef.current;
-      setState((prev) => ({ ...prev, isPaused: false }));
-    }
-  }, [state.isRecording, state.isPaused]);
+    // Resume not implemented in Rust backend yet
+    console.warn('Resume not implemented for native recording');
+  }, []);
 
   const getAudioLevel = useCallback((): number => {
-    if (!analyserRef.current) return 0;
-
-    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-    analyserRef.current.getByteFrequencyData(dataArray);
-
-    // Calculate average volume
-    const sum = dataArray.reduce((acc, val) => acc + val, 0);
-    const average = sum / dataArray.length;
-
-    // Normalize to 0-1 range
-    return average / 255;
+    return levelRef.current;
   }, []);
 
   return {

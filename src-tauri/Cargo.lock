@@ -228,6 +228,7 @@ name = "beatrice"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "cpal",
  "dirs 5.0.1",
  "fundsp",
  "hex",

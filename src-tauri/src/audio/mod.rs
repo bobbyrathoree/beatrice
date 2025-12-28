@@ -3,6 +3,8 @@
 
 pub mod features;
 pub mod ingest;
+pub mod recording;
 
 pub use ingest::{ingest_wav, AudioData, AudioError};
 pub use features::{detect_onsets, extract_features, extract_features_for_window, Onset, OnsetConfig};
+pub use recording::{AudioRecorder, RecordingData, RecordingError};

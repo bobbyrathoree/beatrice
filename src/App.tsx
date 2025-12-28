@@ -93,32 +93,57 @@ function App() {
     }
   };
 
-  // Load audio data from file path
-  const loadAudioData = async (_path: string): Promise<Uint8Array> => {
-    // This would need actual file reading implementation
-    // For now, return empty array as placeholder
-    return new Uint8Array();
+  // Load audio data from file path using Tauri fs plugin
+  const loadAudioData = async (path: string): Promise<Uint8Array> => {
+    const { readFile } = await import("@tauri-apps/plugin-fs");
+    const data = await readFile(path);
+    return new Uint8Array(data);
   };
 
   // Run the full pipeline
   const runPipeline = async (_project: Project, audioBytes: Uint8Array) => {
     try {
+      // Validate audio data
+      if (!audioBytes || audioBytes.length === 0) {
+        throw new Error("No audio data to process");
+      }
+
+      // Check for minimum audio size (WAV header is 44 bytes)
+      if (audioBytes.length <= 44) {
+        throw new Error("Audio file too short to process");
+      }
+
       // Step 1: Detect events
-      const eventResult = await invoke<any>("detect_events", {
-        input: {
-          audio_data: Array.from(audioBytes),
-          run_id: null,
-          use_calibration: false,
-          calibration_profile_id: null,
-        },
-      });
+      let eventResult;
+      try {
+        eventResult = await invoke<any>("detect_events", {
+          input: {
+            audio_data: Array.from(audioBytes),
+            run_id: null,
+            use_calibration: false,
+            calibration_profile_id: null,
+          },
+        });
+      } catch (err) {
+        throw new Error(`Event detection failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Check if any events were detected
+      if (!eventResult.events || eventResult.events.length === 0) {
+        throw new Error("No events detected in audio. Try recording a longer or louder sample.");
+      }
 
       // Step 2: Estimate tempo
-      const tempoResult = await invoke<any>("estimate_tempo", {
-        input: {
-          audio_data: Array.from(audioBytes),
-        },
-      });
+      let tempoResult;
+      try {
+        tempoResult = await invoke<any>("estimate_tempo", {
+          input: {
+            audio_data: Array.from(audioBytes),
+          },
+        });
+      } catch (err) {
+        throw new Error(`Tempo estimation failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       // Update grid settings with detected BPM
       setGridSettings((prev) => ({
@@ -127,34 +152,44 @@ function App() {
       }));
 
       // Step 3: Quantize events
-      const quantizedResult = await invoke<any>("quantize_events_command", {
-        input: {
-          events: eventResult.events,
-          bpm: tempoResult.bpm,
-          time_signature: gridSettings.time_signature,
-          division: gridSettings.division,
-          feel: gridSettings.feel,
-          swing_amount: gridSettings.swing_amount,
-          bar_count: gridSettings.bar_count,
-          quantize_strength: quantizeSettings.strength,
-          lookahead_ms: quantizeSettings.lookahead_ms,
-        },
-      });
+      let quantizedResult;
+      try {
+        quantizedResult = await invoke<any>("quantize_events_command", {
+          input: {
+            events: eventResult.events,
+            bpm: tempoResult.bpm,
+            time_signature: gridSettings.time_signature,
+            division: gridSettings.division,
+            feel: gridSettings.feel,
+            swing_amount: gridSettings.swing_amount,
+            bar_count: gridSettings.bar_count,
+            quantize_strength: quantizeSettings.strength,
+            lookahead_ms: quantizeSettings.lookahead_ms,
+          },
+        });
+      } catch (err) {
+        throw new Error(`Event quantization failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       // Step 4: Arrange events
-      const arrangement = await invoke<any>("arrange_events_command", {
-        input: {
-          events: quantizedResult,
-          template: "synthwave_straight",
-          bpm: tempoResult.bpm,
-          time_signature: gridSettings.time_signature,
-          division: gridSettings.division,
-          feel: gridSettings.feel,
-          swing_amount: gridSettings.swing_amount,
-          bar_count: gridSettings.bar_count,
-          b_emphasis: pipelineParams.bEmphasis,
-        },
-      });
+      let arrangement;
+      try {
+        arrangement = await invoke<any>("arrange_events_command", {
+          input: {
+            events: quantizedResult,
+            template: "synthwave_straight",
+            bpm: tempoResult.bpm,
+            time_signature: gridSettings.time_signature,
+            division: gridSettings.division,
+            feel: gridSettings.feel,
+            swing_amount: gridSettings.swing_amount,
+            bar_count: gridSettings.bar_count,
+            b_emphasis: pipelineParams.bEmphasis,
+          },
+        });
+      } catch (err) {
+        throw new Error(`Event arrangement failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       // Store results
       setPipelineResult({
