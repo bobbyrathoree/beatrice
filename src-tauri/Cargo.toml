@@ -1,0 +1,58 @@
+[package]
+name = "beatrice"
+version = "0.1.0"
+description = "Beatbox to synth beat generator"
+authors = ["Bobby Rathore"]
+license = "MIT"
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "beatrice_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { version = "2.9", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+
+# Audio
+hound = "3.5"                      # WAV read/write
+rodio = "0.20"                     # Audio playback
+fundsp = "0.18"                    # DSP/synth
+
+# MIDI
+midly = "0.5"                      # MIDI file handling
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"                      # File hashing
+hex = "0.4"                        # Hex encoding
+dirs = "5.0"                       # App data directories
+thiserror = "2.0"                  # Error handling
+
+# Async
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
+
+# FFT/DSP analysis (for onset detection)
+realfft = "3.4"                    # FFT for spectral flux
+
+[dev-dependencies]
+tempfile = "3.8"                   # Temporary files for tests
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
