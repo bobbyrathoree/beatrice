@@ -11,13 +11,20 @@
     "fs:default",
     "fs:allow-read-file",
     "fs:allow-read-dir",
+    "fs:allow-write-file",
+    "fs:allow-mkdir",
     "fs:allow-exists",
     {
       "identifier": "fs:scope",
       "allow": [
         "$APPDATA/**",
+        "$APPDATA",
         "$APPLOCALDATA/**",
-        "$HOME/.beatrice/**"
+        "$APPLOCALDATA",
+        "$HOME/.beatrice/**",
+        "$HOME/Library/Application Support/com.beatrice.app/**",
+        "$RESOURCE/**",
+        "$TEMP/**"
       ]
     }
   ]

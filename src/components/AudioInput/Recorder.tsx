@@ -26,6 +26,7 @@ export function Recorder({ onProjectCreated, onError, onCancel }: RecorderProps)
   );
   const [isProcessing, setIsProcessing] = useState(false);
   const animationFrameRef = useRef<number | undefined>(undefined);
+  const hasProcessedRef = useRef(false);
 
   // Wrap callbacks in useCallback to prevent stale closures
   const handleProjectCreated = useCallback((project: Project) => {
@@ -68,19 +69,14 @@ export function Recorder({ onProjectCreated, onError, onCancel }: RecorderProps)
 
   // Process audio data when recording stops
   useEffect(() => {
-    // Only process if we have audio data and aren't already processing
-    if (!audioData || isProcessing) return;
+    // Only process if we have audio data and haven't already processed
+    if (!audioData || hasProcessedRef.current || isProcessing) return;
 
-    // Track if we've already started processing to prevent duplicate calls
-    let hasStartedProcessing = false;
+    // Mark as processed immediately to prevent duplicate calls
+    hasProcessedRef.current = true;
+    setIsProcessing(true);
 
     const processAudio = async () => {
-      // Double-check to prevent race conditions
-      if (hasStartedProcessing) return;
-      hasStartedProcessing = true;
-
-      setIsProcessing(true);
-
       try {
         // audioData is already WAV bytes from Rust backend
         // Create project via Tauri command
@@ -99,6 +95,8 @@ export function Recorder({ onProjectCreated, onError, onCancel }: RecorderProps)
             ? err
             : JSON.stringify(err) || 'Failed to process recording';
         handleError(errorMessage);
+        // Reset the flag on error so user can try again
+        hasProcessedRef.current = false;
       } finally {
         setIsProcessing(false);
       }

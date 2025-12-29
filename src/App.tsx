@@ -128,17 +128,14 @@ function App() {
       // Load audio data for processing
       const audioBytes = await loadAudioData(project.input_path);
 
-      // Check if component is still in processing state (not unmounted/changed)
-      if (state === "processing") {
-        setAudioData(audioBytes);
-        setIsAudioLoading(false);
+      // Set audio data and run pipeline
+      // Note: We don't check state here because setState is async and the local
+      // `state` variable would have a stale closure value
+      setAudioData(audioBytes);
+      setIsAudioLoading(false);
 
-        // Start pipeline with loaded audio data
-        await runPipeline(project, audioBytes);
-      } else {
-        console.warn("State changed during audio loading, aborting pipeline");
-        setIsAudioLoading(false);
-      }
+      // Start pipeline with loaded audio data
+      await runPipeline(project, audioBytes);
     } catch (err) {
       setIsAudioLoading(false);
       setIsPipelineRunning(false);
@@ -211,10 +208,8 @@ function App() {
         throw new Error("Audio file too short to process");
       }
 
-      // Verify state hasn't changed during async operations
-      if (state !== "processing") {
-        throw new Error("Processing cancelled: state changed");
-      }
+      // Note: We don't check `state` here because it's a stale closure value.
+      // Instead, we rely on isPipelineRunning flag to prevent concurrent runs.
 
       // Step 1: Detect events
       let eventResult;
@@ -292,11 +287,6 @@ function App() {
         });
       } catch (err) {
         throw new Error(`Event arrangement failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      // Final state check before storing results
-      if (state !== "processing") {
-        throw new Error("Processing cancelled: state changed during pipeline");
       }
 
       // Store results with BPM from tempo estimation
