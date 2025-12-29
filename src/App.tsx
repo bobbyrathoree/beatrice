@@ -14,7 +14,9 @@ import { Timeline } from "./components/Explainability/Timeline";
 import { DecisionCard } from "./components/Explainability/DecisionCard";
 import { Waveform } from "./components/Waveform";
 import { BeatMarkers } from "./components/BeatMarkers";
+import { SessionSidebar } from "./components/SessionSidebar";
 import type { Project } from "./store/useStore";
+import type { ProjectSummary } from "./hooks/useProjects";
 import type { DetectedEvent } from "./types/visualization";
 import type { EventDecision } from "./types/explainability";
 import "./styles/brutalist.css";
@@ -359,6 +361,22 @@ function App() {
     setError(null);
   }, [setCurrentScreen]);
 
+  // Handle session selection from sidebar
+  const handleSessionSelect = useCallback(async (projectSummary: ProjectSummary) => {
+    try {
+      // Load the full project details by calling Tauri API directly
+      const { getTauriAPI } = await import("./utils/tauri-mock");
+      const tauri = getTauriAPI();
+      const fullProject = await tauri.invoke("get_project", { id: projectSummary.id });
+
+      if (fullProject) {
+        await handleProjectCreated(fullProject as Project);
+      }
+    } catch (err) {
+      handleError(`Failed to load session: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [handleProjectCreated, handleError]);
+
   // Convert pipeline events to EventDecision format for explainability
   // Memoized to prevent unnecessary recalculations on every render
   const eventDecisions = useMemo<EventDecision[]>(() => {
@@ -417,7 +435,13 @@ function App() {
     <div className="app">
       {/* Header */}
       <header className="header">
-        <h1 className="logo">BEATRICE</h1>
+        <h1
+          className="logo logo-home-button"
+          onClick={handleNewRecording}
+          title="Return to home"
+        >
+          BEATRICE
+        </h1>
         {state === "recording" && <span className="rec-indicator">● REC</span>}
       </header>
 
@@ -435,31 +459,39 @@ function App() {
         )}
       </AnimatePresence>
 
-      {/* Main Content */}
-      <main className="main">
+      {/* App Body - Contains Sidebar and Main Content */}
+      <div className="app-body">
+        {/* Session Sidebar */}
+        <SessionSidebar onSessionSelect={handleSessionSelect} />
+
+        {/* Main Content */}
+        <main className="main">
         <AnimatePresence mode="wait">
           {/* INPUT STATE */}
           {state === "input" && (
             <motion.div
               key="input"
-              className="input-container"
+              className="input-container-redesign"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.3 }}
             >
-              <div className="input-box">
-                {/* Record Section */}
+              {/* Main Action Cards */}
+              <div className="action-cards-container">
+                {/* Record Card */}
                 <motion.div
-                  className="record-section"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
+                  className="action-card"
+                  initial={{ opacity: 0, x: -40 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.2 }}
                 >
-                  <span className="record-icon">●</span>
-                  <h2 style={{ fontSize: "24px", fontWeight: "bold", margin: 0 }}>
-                    RECORD YOUR BEATBOX
-                  </h2>
+                  <div className="card-icon">●</div>
+                  <h2 className="card-title">RECORD</h2>
+                  <p className="card-description">
+                    Capture your beatbox performance live with your microphone
+                  </p>
+                  <div className="card-spacer"></div>
                   <motion.button
                     className="btn btn-primary btn-large"
                     onClick={() => setState("recording")}
@@ -470,41 +502,39 @@ function App() {
                   </motion.button>
                 </motion.div>
 
-                {/* Divider */}
+                {/* Upload Card */}
                 <motion.div
-                  className="divider"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
+                  className="action-card"
+                  initial={{ opacity: 0, x: 40 }}
+                  animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.2 }}
                 >
-                  <span>or</span>
-                </motion.div>
-
-                {/* Upload Section */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 }}
-                >
-                  <DropZone
-                    onProjectCreated={handleProjectCreated}
-                    onError={handleError}
-                  />
-                </motion.div>
-
-                {/* Demo Button */}
-                <motion.div
-                  style={{ width: "100%" }}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4 }}
-                >
-                  <DemoButton
-                    onProjectCreated={handleProjectCreated}
-                    onError={handleError}
-                  />
+                  <div className="card-icon">↑</div>
+                  <h2 className="card-title">UPLOAD</h2>
+                  <p className="card-description">
+                    Drop an existing WAV file to analyze and transform
+                  </p>
+                  <div className="card-dropzone-wrapper">
+                    <DropZone
+                      onProjectCreated={handleProjectCreated}
+                      onError={handleError}
+                    />
+                  </div>
                 </motion.div>
               </div>
+
+              {/* Demo Button */}
+              <motion.div
+                className="demo-section"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+              >
+                <DemoButton
+                  onProjectCreated={handleProjectCreated}
+                  onError={handleError}
+                />
+              </motion.div>
             </motion.div>
           )}
 
@@ -656,7 +686,8 @@ function App() {
             </motion.div>
           )}
         </AnimatePresence>
-      </main>
+        </main>
+      </div>
 
       {/* Decision Card Popup */}
       <DecisionCard

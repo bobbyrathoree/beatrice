@@ -1,7 +1,10 @@
 // React hooks for project and run management via Tauri IPC
 import { useEffect, useState, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { getTauriAPI } from '../utils/tauri-mock';
 import { Project, Run, Artifact } from '../store/useStore';
+
+// Get Tauri API (real or mock depending on environment)
+const tauri = getTauriAPI();
 
 export interface ProjectSummary {
   id: string;
@@ -38,7 +41,7 @@ export function useProjects() {
     try {
       setLoading(true);
       setError(null);
-      const result = await invoke<ProjectSummary[]>('list_projects');
+      const result = await tauri.invoke<ProjectSummary[]>('list_projects');
       setProjects(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -55,7 +58,7 @@ export function useProjects() {
     async (name: string, inputData: Uint8Array): Promise<Project | null> => {
       try {
         setError(null);
-        const project = await invoke<Project>('create_project', {
+        const project = await tauri.invoke<Project>('create_project', {
           input: {
             name,
             input_data: Array.from(inputData),
@@ -74,7 +77,7 @@ export function useProjects() {
   const getProject = useCallback(async (id: string): Promise<Project | null> => {
     try {
       setError(null);
-      const project = await invoke<Project | null>('get_project', { id });
+      const project = await tauri.invoke<Project | null>('get_project', { id });
       return project;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -111,7 +114,7 @@ export function useRuns(projectId: string | null) {
     try {
       setLoading(true);
       setError(null);
-      const result = await invoke<Run[]>('list_runs_for_project', {
+      const result = await tauri.invoke<Run[]>('list_runs_for_project', {
         project_id: projectId,
       });
       setRuns(result);
@@ -139,7 +142,7 @@ export function useRuns(projectId: string | null) {
 
       try {
         setError(null);
-        const run = await invoke<Run>('create_run', {
+        const run = await tauri.invoke<Run>('create_run', {
           input: {
             project_id: projectId,
             pipeline_version: params.pipelineVersion,
@@ -163,7 +166,7 @@ export function useRuns(projectId: string | null) {
   const getRun = useCallback(async (runId: string): Promise<Run | null> => {
     try {
       setError(null);
-      const run = await invoke<Run | null>('get_run', { id: runId });
+      const run = await tauri.invoke<Run | null>('get_run', { id: runId });
       return run;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -175,7 +178,7 @@ export function useRuns(projectId: string | null) {
     async (runId: string): Promise<RunWithArtifacts | null> => {
       try {
         setError(null);
-        const result = await invoke<RunWithArtifacts | null>(
+        const result = await tauri.invoke<RunWithArtifacts | null>(
           'get_run_with_artifacts',
           { run_id: runId }
         );
@@ -195,7 +198,7 @@ export function useRuns(projectId: string | null) {
     ): Promise<boolean> => {
       try {
         setError(null);
-        await invoke('update_run_status', {
+        await tauri.invoke('update_run_status', {
           input: {
             run_id: runId,
             status,
@@ -240,7 +243,7 @@ export function useArtifacts() {
     }): Promise<Artifact | null> => {
       try {
         setError(null);
-        const artifact = await invoke<Artifact>('create_artifact', {
+        const artifact = await tauri.invoke<Artifact>('create_artifact', {
           input: {
             run_id: params.runId,
             kind: params.kind,
@@ -277,7 +280,7 @@ export function useCalibrationProfiles() {
     try {
       setLoading(true);
       setError(null);
-      const result = await invoke<CalibrationProfile[]>(
+      const result = await tauri.invoke<CalibrationProfile[]>(
         'list_calibration_profiles'
       );
       setProfiles(result);
@@ -300,7 +303,7 @@ export function useCalibrationProfiles() {
     ): Promise<CalibrationProfile | null> => {
       try {
         setError(null);
-        const profile = await invoke<CalibrationProfile>(
+        const profile = await tauri.invoke<CalibrationProfile>(
           'create_calibration_profile',
           {
             input: {
@@ -324,7 +327,7 @@ export function useCalibrationProfiles() {
     async (id: string): Promise<CalibrationProfile | null> => {
       try {
         setError(null);
-        const profile = await invoke<CalibrationProfile | null>(
+        const profile = await tauri.invoke<CalibrationProfile | null>(
           'get_calibration_profile',
           { id }
         );
@@ -344,7 +347,7 @@ export function useCalibrationProfiles() {
     ): Promise<boolean> => {
       try {
         setError(null);
-        await invoke('update_calibration_profile', {
+        await tauri.invoke('update_calibration_profile', {
           input: {
             id,
             ...updates,
@@ -364,7 +367,7 @@ export function useCalibrationProfiles() {
     async (id: string): Promise<boolean> => {
       try {
         setError(null);
-        await invoke('delete_calibration_profile', { id });
+        await tauri.invoke('delete_calibration_profile', { id });
         await refresh();
         return true;
       } catch (err) {
