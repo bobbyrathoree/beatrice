@@ -89,7 +89,13 @@ fn calculate_zcr(samples: &[f32]) -> f32 {
         }
     }
 
-    crossings as f32 / (samples.len() - 1) as f32
+    // Guard against division by zero (checked above, but defensive)
+    let denominator = samples.len().saturating_sub(1);
+    if denominator == 0 {
+        return 0.0;
+    }
+
+    crossings as f32 / denominator as f32
 }
 
 /// Calculate spectral centroid and band energies
@@ -122,6 +128,12 @@ fn calculate_spectral_features(
 /// Apply Hann window function to reduce spectral leakage
 fn apply_hann_window(samples: &mut [f32]) {
     let n = samples.len();
+
+    // Guard against empty or single-sample arrays
+    if n == 0 {
+        return;
+    }
+
     for i in 0..n {
         let window_val = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / n as f32).cos());
         samples[i] *= window_val;
@@ -145,6 +157,11 @@ fn compute_fft(samples: &[f32]) -> Vec<f32> {
 /// Calculate spectral centroid (center of mass of spectrum)
 /// Returns frequency in Hz
 fn calculate_spectral_centroid(spectrum: &[f32], sample_rate: u32, window_size: usize) -> f32 {
+    // Guard against zero window size
+    if window_size == 0 {
+        return 0.0;
+    }
+
     let mut weighted_sum = 0.0;
     let mut total_magnitude = 0.0;
 
@@ -166,7 +183,17 @@ fn calculate_spectral_centroid(spectrum: &[f32], sample_rate: u32, window_size: 
 /// Calculate energy in frequency bands: low (0-200 Hz), mid (200-2000 Hz), high (2000+ Hz)
 /// Returns normalized energy ratios [low, mid, high]
 fn calculate_band_energies(spectrum: &[f32], sample_rate: u32, window_size: usize) -> [f32; 3] {
+    // Guard against zero window size
+    if window_size == 0 {
+        return [0.0, 0.0, 0.0];
+    }
+
     let bin_width = sample_rate as f32 / window_size as f32;
+
+    // Guard against zero bin width (should not happen with guard above, but defensive)
+    if bin_width <= 0.0 {
+        return [0.0, 0.0, 0.0];
+    }
 
     // Define band boundaries
     let low_max_hz = 200.0;
@@ -236,6 +263,11 @@ fn compute_spectral_flux(
     let window_size = config.window_size;
     let hop_size = config.hop_size;
 
+    // Guard against zero hop size
+    if hop_size == 0 {
+        return Vec::new();
+    }
+
     let num_frames = (samples.len().saturating_sub(window_size)) / hop_size + 1;
 
     if num_frames == 0 {
@@ -292,6 +324,11 @@ fn pick_onset_peaks(
     }
 
     // Calculate adaptive threshold
+    // Guard against empty flux (checked above, but defensive)
+    if flux.is_empty() {
+        return Vec::new();
+    }
+
     let mean = flux.iter().sum::<f32>() / flux.len() as f32;
     let variance = flux.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / flux.len() as f32;
     let std_dev = variance.sqrt();
@@ -299,6 +336,12 @@ fn pick_onset_peaks(
 
     let mut onsets = Vec::new();
     let hop_size = config.hop_size;
+
+    // Guard against zero hop size
+    if hop_size == 0 {
+        return Vec::new();
+    }
+
     let min_gap_samples = (config.min_onset_gap_ms * sample_rate as f64 / 1000.0) as usize;
     let min_gap_frames = min_gap_samples / hop_size;
 
@@ -311,8 +354,13 @@ fn pick_onset_peaks(
         let gap_ok = (i - last_onset_frame) >= min_gap_frames;
 
         if is_peak && above_threshold && gap_ok {
-            let timestamp_ms = (i * hop_size) as f64 * 1000.0 / sample_rate as f64;
-            let strength = (flux[i] - threshold) / (std_dev + 1e-6); // Normalize strength
+            // Guard against zero sample rate (should not happen, but defensive)
+            let timestamp_ms = if sample_rate > 0 {
+                (i * hop_size) as f64 * 1000.0 / sample_rate as f64
+            } else {
+                0.0
+            };
+            let strength = (flux[i] - threshold) / (std_dev + 1e-6); // Normalize strength (1e-6 protects from division by zero)
 
             onsets.push(Onset {
                 timestamp_ms,

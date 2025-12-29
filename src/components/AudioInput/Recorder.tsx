@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
@@ -26,6 +26,15 @@ export function Recorder({ onProjectCreated, onError, onCancel }: RecorderProps)
   );
   const [isProcessing, setIsProcessing] = useState(false);
   const animationFrameRef = useRef<number | undefined>(undefined);
+
+  // Wrap callbacks in useCallback to prevent stale closures
+  const handleProjectCreated = useCallback((project: Project) => {
+    onProjectCreated(project);
+  }, [onProjectCreated]);
+
+  const handleError = useCallback((errorMessage: string) => {
+    onError(errorMessage);
+  }, [onError]);
 
   // Update waveform visualization
   useEffect(() => {
@@ -82,28 +91,28 @@ export function Recorder({ onProjectCreated, onError, onCancel }: RecorderProps)
           },
         });
 
-        onProjectCreated(project);
+        handleProjectCreated(project);
       } catch (err) {
         const errorMessage = err instanceof Error
           ? err.message
           : typeof err === 'string'
             ? err
             : JSON.stringify(err) || 'Failed to process recording';
-        onError(errorMessage);
+        handleError(errorMessage);
       } finally {
         setIsProcessing(false);
       }
     };
 
     processAudio();
-  }, [audioData]);
+  }, [audioData, isProcessing, handleProjectCreated, handleError]);
 
   // Display recording errors
   useEffect(() => {
     if (error) {
-      onError(error);
+      handleError(error);
     }
-  }, [error, onError]);
+  }, [error, handleError]);
 
   // Auto-start recording on mount
   useEffect(() => {

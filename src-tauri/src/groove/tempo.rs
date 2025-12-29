@@ -95,6 +95,7 @@ pub fn estimate_tempo_with_config(
     let (best_interval_ms, confidence) = select_best_tempo(&peaks, &histogram, config);
 
     // Step 5: Convert interval to BPM
+    // Guard against zero or negative interval
     let bpm = if best_interval_ms > 0.0 {
         60000.0 / best_interval_ms // Convert ms per beat to BPM
     } else {
@@ -128,9 +129,19 @@ fn compute_iois(onsets: &[Onset]) -> Vec<f64> {
 /// Build histogram of inter-onset intervals
 /// Bins are distributed linearly across the tempo range
 fn build_ioi_histogram(iois: &[f64], config: &TempoConfig) -> Vec<f32> {
+    // Guard against zero BPM values
+    if config.max_bpm <= 0.0 || config.min_bpm <= 0.0 {
+        return vec![0.0f32; config.histogram_bins];
+    }
+
     // Calculate interval range in milliseconds
     let min_interval_ms = 60000.0 / config.max_bpm; // Max BPM = min interval
     let max_interval_ms = 60000.0 / config.min_bpm; // Min BPM = max interval
+
+    // Guard against zero bin width
+    if config.histogram_bins == 0 || (max_interval_ms - min_interval_ms).abs() < f64::EPSILON {
+        return vec![0.0f32; config.histogram_bins];
+    }
 
     let bin_width = (max_interval_ms - min_interval_ms) / config.histogram_bins as f64;
     let mut histogram = vec![0.0f32; config.histogram_bins];
@@ -173,7 +184,11 @@ fn smooth_histogram(histogram: &[f32], window_size: usize) -> Vec<f32> {
         let end = (i + half_window + 1).min(histogram.len());
         let sum: f32 = histogram[start..end].iter().sum();
         let count = (end - start) as f32;
-        smoothed[i] = sum / count;
+
+        // Guard against zero count (should not happen, but defensive)
+        if count > 0.0 {
+            smoothed[i] = sum / count;
+        }
     }
 
     smoothed
@@ -209,22 +224,38 @@ fn select_best_tempo(
         return (500.0, 0.0); // Default: 120 BPM
     }
 
+    // Guard against zero BPM values
+    if config.max_bpm <= 0.0 || config.min_bpm <= 0.0 {
+        return (500.0, 0.0);
+    }
+
     // Use the strongest peak
     let (best_bin, peak_strength) = peaks[0];
 
     // Convert bin to interval in milliseconds
     let min_interval_ms = 60000.0 / config.max_bpm;
     let max_interval_ms = 60000.0 / config.min_bpm;
+
+    // Guard against zero bin count
+    if config.histogram_bins == 0 {
+        return (500.0, 0.0);
+    }
+
     let bin_width = (max_interval_ms - min_interval_ms) / config.histogram_bins as f64;
 
     let interval_ms = min_interval_ms + (best_bin as f64 * bin_width);
 
     // Calculate confidence based on peak strength relative to histogram mean
-    let histogram_mean: f32 = histogram.iter().sum::<f32>() / histogram.len() as f32;
-    let confidence = if histogram_mean > 0.0 {
-        (peak_strength / (histogram_mean * 3.0)).min(1.0)
-    } else {
+    // Guard against empty histogram
+    let confidence = if histogram.is_empty() {
         0.0
+    } else {
+        let histogram_mean: f32 = histogram.iter().sum::<f32>() / histogram.len() as f32;
+        if histogram_mean > 0.0 {
+            (peak_strength / (histogram_mean * 3.0)).min(1.0)
+        } else {
+            0.0
+        }
     };
 
     (interval_ms, confidence)
@@ -248,6 +279,12 @@ fn generate_beat_grid(onsets: &[Onset], bpm: f64, interval_ms: f64) -> Vec<f64> 
 
     // Test different phase offsets (0 to one beat interval)
     let num_phase_tests = 8;
+
+    // Guard against zero interval
+    if interval_ms <= 0.0 {
+        return Vec::new();
+    }
+
     let phase_step = interval_ms / num_phase_tests as f64;
 
     let mut best_phase = 0.0;
@@ -278,6 +315,11 @@ fn generate_beat_grid(onsets: &[Onset], bpm: f64, interval_ms: f64) -> Vec<f64> 
 /// Score how well a beat grid aligns with detected onsets
 /// Returns higher scores for better alignment
 fn score_beat_alignment(onsets: &[Onset], phase: f64, interval_ms: f64, end_time: f64) -> f64 {
+    // Guard against zero interval
+    if interval_ms <= 0.0 {
+        return 0.0;
+    }
+
     let tolerance_ms = interval_ms * 0.15; // 15% tolerance window
     let mut score = 0.0;
 
@@ -291,7 +333,8 @@ fn score_beat_alignment(onsets: &[Onset], phase: f64, interval_ms: f64, end_time
             .unwrap_or(f64::MAX);
 
         // Score inversely proportional to distance, within tolerance
-        if closest_distance < tolerance_ms {
+        // Guard against zero tolerance (should not happen with guard above, but defensive)
+        if tolerance_ms > 0.0 && closest_distance < tolerance_ms {
             score += (tolerance_ms - closest_distance) / tolerance_ms;
         }
 

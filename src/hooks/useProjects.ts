@@ -112,7 +112,7 @@ export function useRuns(projectId: string | null) {
       setLoading(true);
       setError(null);
       const result = await invoke<Run[]>('list_runs_for_project', {
-        projectId,
+        project_id: projectId,
       });
       setRuns(result);
     } catch (err) {
@@ -177,7 +177,7 @@ export function useRuns(projectId: string | null) {
         setError(null);
         const result = await invoke<RunWithArtifacts | null>(
           'get_run_with_artifacts',
-          { runId }
+          { run_id: runId }
         );
         return result;
       } catch (err) {

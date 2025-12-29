@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./store/useStore";
@@ -21,11 +21,45 @@ import "./styles/brutalist.css";
 
 type AppState = "input" | "recording" | "processing" | "results";
 
+// Matches Rust EventData structure from commands.rs
+interface EventData {
+  id: string;
+  timestamp_ms: number;
+  duration_ms: number;
+  class: string;
+  confidence: number;
+  features: {
+    spectral_centroid: number;
+    zcr: number;
+    low_band_energy: number;
+    mid_band_energy: number;
+    high_band_energy: number;
+  };
+}
+
+// Matches Rust QuantizedEvent structure
+interface QuantizedEvent {
+  event_id: string;
+  original_timestamp_ms: number;
+  quantized_timestamp_ms: number;
+  snap_delta_ms: number;
+  event: EventData;
+}
+
+// Matches Rust Arrangement structure
+interface Arrangement {
+  tracks: Array<{
+    name: string;
+    events: QuantizedEvent[];
+  }>;
+}
+
 interface PipelineResult {
-  events: any[];
-  arrangement: any;
-  quantized_events: any[];
+  events: EventData[];
+  arrangement: Arrangement;
+  quantized_events: QuantizedEvent[];
   duration_ms?: number;
+  bpm?: number;
 }
 
 function App() {
@@ -43,6 +77,8 @@ function App() {
   // Processing data
   const [audioData, setAudioData] = useState<Uint8Array | null>(null);
   const [pipelineResult, setPipelineResult] = useState<PipelineResult | null>(null);
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
+  const [isPipelineRunning, setIsPipelineRunning] = useState(false);
 
   // UI state
   const [audioLevel, setAudioLevel] = useState(0);
@@ -75,19 +111,37 @@ function App() {
 
   // Handle project created from recording or upload
   const handleProjectCreated = async (project: Project) => {
+    // Prevent concurrent pipeline runs
+    if (isPipelineRunning || isAudioLoading) {
+      console.warn("Pipeline already running, ignoring duplicate request");
+      return;
+    }
+
     try {
       setCurrentProject(project);
       setCurrentScreen("processing");
       setState("processing");
       setError(null);
+      setIsAudioLoading(true);
+      setAudioData(null); // Clear previous audio data
 
       // Load audio data for processing
       const audioBytes = await loadAudioData(project.input_path);
-      setAudioData(audioBytes);
 
-      // Start pipeline
-      await runPipeline(project, audioBytes);
+      // Check if component is still in processing state (not unmounted/changed)
+      if (state === "processing") {
+        setAudioData(audioBytes);
+        setIsAudioLoading(false);
+
+        // Start pipeline with loaded audio data
+        await runPipeline(project, audioBytes);
+      } else {
+        console.warn("State changed during audio loading, aborting pipeline");
+        setIsAudioLoading(false);
+      }
     } catch (err) {
+      setIsAudioLoading(false);
+      setIsPipelineRunning(false);
       handleError(err instanceof Error ? err.message : "Failed to process audio");
       setState("input");
     }
@@ -95,15 +149,59 @@ function App() {
 
   // Load audio data from file path using Tauri fs plugin
   const loadAudioData = async (path: string): Promise<Uint8Array> => {
-    const { readFile } = await import("@tauri-apps/plugin-fs");
-    const data = await readFile(path);
-    return new Uint8Array(data);
+    // Validate path input
+    if (!path || path.trim() === "") {
+      throw new Error("Invalid file path: path is empty or undefined");
+    }
+
+    try {
+      // Import fs plugin functions
+      const { readFile, exists } = await import("@tauri-apps/plugin-fs");
+
+      // Check if file exists before attempting to read
+      const fileExists = await exists(path);
+      if (!fileExists) {
+        throw new Error(`File not found: ${path}`);
+      }
+
+      // Read file data
+      const data = await readFile(path);
+
+      // Validate that we received data
+      if (!data || data.length === 0) {
+        throw new Error(`File is empty or could not be read: ${path}`);
+      }
+
+      return new Uint8Array(data);
+    } catch (err) {
+      // Provide more specific error messages based on error type
+      if (err instanceof Error) {
+        // Re-throw our custom errors with their original messages
+        if (err.message.includes("File not found") ||
+            err.message.includes("Invalid file path") ||
+            err.message.includes("File is empty")) {
+          throw err;
+        }
+        // Wrap other errors with context
+        throw new Error(`Failed to read audio file: ${err.message}`);
+      }
+      // Handle non-Error exceptions
+      throw new Error(`Failed to read audio file: ${String(err)}`);
+    }
   };
 
   // Run the full pipeline
   const runPipeline = async (_project: Project, audioBytes: Uint8Array) => {
+    // Prevent concurrent pipeline runs
+    if (isPipelineRunning) {
+      console.warn("Pipeline already running, ignoring duplicate request");
+      return;
+    }
+
+    setIsPipelineRunning(true);
+
     try {
-      // Validate audio data
+      // Validate audio data exists and is not stale
       if (!audioBytes || audioBytes.length === 0) {
         throw new Error("No audio data to process");
       }
@@ -111,6 +209,11 @@ function App() {
       // Check for minimum audio size (WAV header is 44 bytes)
       if (audioBytes.length <= 44) {
         throw new Error("Audio file too short to process");
+      }
+
+      // Verify state hasn't changed during async operations
+      if (state !== "processing") {
+        throw new Error("Processing cancelled: state changed");
       }
 
       // Step 1: Detect events
@@ -191,111 +294,134 @@ function App() {
         throw new Error(`Event arrangement failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      // Store results
+      // Final state check before storing results
+      if (state !== "processing") {
+        throw new Error("Processing cancelled: state changed during pipeline");
+      }
+
+      // Store results with BPM from tempo estimation
       setPipelineResult({
         events: eventResult.events,
         quantized_events: quantizedResult,
         arrangement,
+        bpm: tempoResult.bpm,
       });
 
       // Transition to results
       setState("results");
       setCurrentScreen("results");
+      setIsPipelineRunning(false);
     } catch (err) {
       console.error("Pipeline failed:", err);
+      setIsPipelineRunning(false);
       handleError(err instanceof Error ? err.message : "Pipeline processing failed");
       setState("input");
+      setAudioData(null); // Clear stale audio data
     }
   };
 
-  // Error handler
-  const handleError = (errorMessage: string) => {
+  // Error handler - wrapped in useCallback to prevent unnecessary re-renders
+  const handleError = useCallback((errorMessage: string) => {
     setError(errorMessage);
     setTimeout(() => setError(null), 5000);
-  };
+  }, []);
 
-  // Cancel recording
-  const handleCancelRecording = () => {
+  // Cancel recording - wrapped in useCallback to prevent unnecessary re-renders
+  const handleCancelRecording = useCallback(() => {
     setState("input");
-  };
+  }, []);
 
-  // Handle theme change
-  const handleThemeChange = (theme: Theme | null) => {
+  // Handle theme change - wrapped in useCallback to prevent unnecessary re-renders
+  const handleThemeChange = useCallback((theme: Theme | null) => {
     setSelectedTheme(theme);
     if (theme) {
       setPipelineParam("theme", theme.name);
     }
-  };
+  }, [setPipelineParam]);
 
-  // Handle grid settings change
-  const handleGridChange = (settings: GridSettings) => {
+  // Handle grid settings change - wrapped in useCallback to prevent unnecessary re-renders
+  const handleGridChange = useCallback((settings: GridSettings) => {
     setGridSettings(settings);
     setPipelineParam("bpm", settings.bpm);
     setPipelineParam("swing", settings.swing_amount);
-  };
+  }, [setPipelineParam]);
 
-  // Handle quantize settings change
-  const handleQuantizeChange = (settings: QuantizeSettings) => {
+  // Handle quantize settings change - wrapped in useCallback to prevent unnecessary re-renders
+  const handleQuantizeChange = useCallback((settings: QuantizeSettings) => {
     setQuantizeSettings(settings);
     setPipelineParam("quantize", settings.strength);
-  };
+  }, [setPipelineParam]);
 
-  // Handle B-emphasis change
-  const handleBEmphasisChange = (value: number) => {
+  // Handle B-emphasis change - wrapped in useCallback to prevent unnecessary re-renders
+  const handleBEmphasisChange = useCallback((value: number) => {
     setPipelineParam("bEmphasis", value);
-  };
+  }, [setPipelineParam]);
 
-  // Start new recording
-  const handleNewRecording = () => {
+  // Start new recording - wrapped in useCallback to prevent unnecessary re-renders
+  const handleNewRecording = useCallback(() => {
+    // Reset all state to prevent stale data issues
     setState("input");
     setCurrentScreen("input");
     setPipelineResult(null);
     setAudioData(null);
-  };
+    setIsAudioLoading(false);
+    setIsPipelineRunning(false);
+    setError(null);
+  }, [setCurrentScreen]);
 
   // Convert pipeline events to EventDecision format for explainability
-  const convertToEventDecisions = (): EventDecision[] => {
-    if (!pipelineResult) return [];
+  // Memoized to prevent unnecessary recalculations on every render
+  const eventDecisions = useMemo<EventDecision[]>(() => {
+    // Guard against null or invalid pipeline result
+    if (!pipelineResult || !pipelineResult.events || !Array.isArray(pipelineResult.events)) {
+      return [];
+    }
 
-    return pipelineResult.events.map((event: any, index: number) => {
-      const quantizedEvent = pipelineResult.quantized_events[index] || event;
+    return pipelineResult.events.map((event: EventData, index: number) => {
+      // Get quantized event with fallback
+      const quantizedEvent = pipelineResult.quantized_events?.[index];
+      const quantizedTimestamp = quantizedEvent?.quantized_timestamp_ms ?? event.timestamp_ms;
+      const originalTimestamp = quantizedEvent?.original_timestamp_ms ?? event.timestamp_ms;
+
+      // Ensure features object exists with all required fields
+      const features = {
+        spectral_centroid: event.features?.spectral_centroid ?? 0,
+        zcr: event.features?.zcr ?? 0,
+        low_band_energy: event.features?.low_band_energy ?? 0,
+        mid_band_energy: event.features?.mid_band_energy ?? 0,
+        high_band_energy: event.features?.high_band_energy ?? 0,
+      };
 
       return {
         event_id: event.id || `event_${index}`,
-        original_timestamp_ms: event.timestamp_ms || event.timestamp * 1000 || 0,
-        quantized_timestamp_ms: quantizedEvent.timestamp_ms || quantizedEvent.timestamp * 1000 || 0,
-        snap_delta_ms: (quantizedEvent.timestamp_ms || 0) - (event.timestamp_ms || 0),
-        class: event.class || event.type || 'BilabialPlosive',
-        confidence: event.confidence || 0.85,
-        mapped_to: event.mapped_instruments || ['SYNTH'],
-        reasoning: event.reasoning || `Classified as ${event.class || event.type} based on audio features. Confidence: ${((event.confidence || 0.85) * 100).toFixed(1)}%.`,
-        features: event.features || {
-          spectral_centroid: event.spectral_centroid || 0,
-          zcr: event.zcr || 0,
-          low_band_energy: event.low_band_energy || 0,
-          mid_band_energy: event.mid_band_energy || 0,
-          high_band_energy: event.high_band_energy || 0,
-        },
+        original_timestamp_ms: originalTimestamp,
+        quantized_timestamp_ms: quantizedTimestamp,
+        snap_delta_ms: quantizedTimestamp - originalTimestamp,
+        class: (event.class || 'BilabialPlosive') as EventDecision['class'],
+        confidence: event.confidence ?? 0.85,
+        mapped_to: ['SYNTH'],
+        reasoning: `Classified as ${event.class} based on audio features. Confidence: ${((event.confidence ?? 0.85) * 100).toFixed(1)}%.`,
+        features,
       };
     });
-  };
+  }, [pipelineResult]);
 
-  // Handle event click on timeline
-  const handleEventClick = (eventId: string) => {
+  // Handle event click on timeline - wrapped in useCallback to prevent unnecessary re-renders
+  const handleEventClick = useCallback((eventId: string) => {
     setSelectedEventId(eventId);
-  };
+  }, []);
 
-  // Handle closing decision card
-  const handleCloseDecisionCard = () => {
+  // Handle closing decision card - wrapped in useCallback to prevent unnecessary re-renders
+  const handleCloseDecisionCard = useCallback(() => {
     setSelectedEventId(null);
-  };
+  }, []);
 
   // Get selected event for DecisionCard
-  const getSelectedEvent = (): EventDecision | null => {
+  // Memoized to avoid recalculating on every render
+  const selectedEvent = useMemo<EventDecision | null>(() => {
     if (!selectedEventId) return null;
-    const eventDecisions = convertToEventDecisions();
     return eventDecisions.find(e => e.event_id === selectedEventId) || null;
-  };
+  }, [selectedEventId, eventDecisions]);
 
   return (
     <div className="app">
@@ -446,12 +572,12 @@ function App() {
               <Waveform
                 audioData={audioData || undefined}
                 duration={pipelineResult?.duration_ms || 10000}
-                events={convertToEventDecisions()}
+                events={eventDecisions}
               />
 
               {/* B-Sound Markers */}
               <BeatMarkers
-                events={convertToEventDecisions()}
+                events={eventDecisions}
                 duration={pipelineResult?.duration_ms || 10000}
                 onMarkerClick={(event) => setSelectedEventId(event.event_id)}
               />
@@ -464,7 +590,7 @@ function App() {
                   transition={{ delay: 0.15 }}
                 >
                   <Timeline
-                    events={convertToEventDecisions()}
+                    events={eventDecisions}
                     onEventClick={handleEventClick}
                   />
                 </motion.div>
@@ -544,7 +670,7 @@ function App() {
 
       {/* Decision Card Popup */}
       <DecisionCard
-        event={getSelectedEvent()}
+        event={selectedEvent}
         onClose={handleCloseDecisionCard}
       />
     </div>

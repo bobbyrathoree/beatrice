@@ -158,9 +158,21 @@ impl Grid {
 
     /// Calculate all beat positions based on grid parameters
     fn calculate_beat_positions(&mut self) {
+        // Guard against zero BPM
+        if self.bpm <= 0.0 {
+            self.beat_positions_ms = Vec::new();
+            return;
+        }
+
         let ms_per_beat = 60000.0 / self.bpm;
         let subdivisions_per_beat = self.division.subdivisions_per_beat();
         let beats_per_bar = self.time_signature.beats_per_bar();
+
+        // Guard against zero subdivisions (should not happen with enum, but defensive)
+        if subdivisions_per_beat == 0 {
+            self.beat_positions_ms = Vec::new();
+            return;
+        }
 
         let total_beats = self.bar_count * beats_per_bar;
         let total_subdivisions = total_beats * subdivisions_per_beat;
@@ -236,6 +248,11 @@ impl Grid {
 
     /// Get bar number for a given timestamp (0-indexed)
     pub fn get_bar_number(&self, timestamp_ms: f64) -> u32 {
+        // Guard against zero BPM
+        if self.bpm <= 0.0 {
+            return 0;
+        }
+
         let ms_per_beat = 60000.0 / self.bpm;
         let beats_per_bar = self.time_signature.beats_per_bar();
         let ms_per_bar = ms_per_beat * beats_per_bar as f64;
@@ -249,11 +266,16 @@ impl Grid {
 
     /// Get beat number within bar for a given timestamp (1-indexed: 1, 2, 3, 4)
     pub fn get_beat_in_bar(&self, timestamp_ms: f64) -> u32 {
+        // Guard against zero BPM
+        if self.bpm <= 0.0 {
+            return 1;
+        }
+
         let ms_per_beat = 60000.0 / self.bpm;
         let beats_per_bar = self.time_signature.beats_per_bar();
         let ms_per_bar = ms_per_beat * beats_per_bar as f64;
 
-        if ms_per_bar > 0.0 {
+        if ms_per_bar > 0.0 && ms_per_beat > 0.0 {
             let position_in_bar = timestamp_ms % ms_per_bar;
             let beat = (position_in_bar / ms_per_beat).floor() as u32;
             (beat + 1).min(beats_per_bar)
@@ -269,7 +291,17 @@ impl Grid {
         let subdivisions_per_beat = self.division.subdivisions_per_beat();
         let beats_per_bar = self.time_signature.beats_per_bar();
 
-        let bar = beat_idx as u32 / (beats_per_bar * subdivisions_per_beat);
+        // Guard against zero subdivisions or beats (should not happen, but defensive)
+        let total_subdivisions_per_bar = beats_per_bar * subdivisions_per_beat;
+        if total_subdivisions_per_bar == 0 || subdivisions_per_beat == 0 {
+            return GridPosition {
+                bar: 0,
+                beat: 0,
+                subdivision: 0,
+            };
+        }
+
+        let bar = beat_idx as u32 / total_subdivisions_per_bar;
         let beat_in_bar = (beat_idx as u32 / subdivisions_per_beat) % beats_per_bar;
         let subdivision = beat_idx as u32 % subdivisions_per_beat;
 
@@ -294,6 +326,11 @@ impl Grid {
 
     /// Get total duration of the grid in milliseconds
     pub fn total_duration_ms(&self) -> f64 {
+        // Guard against zero BPM
+        if self.bpm <= 0.0 {
+            return 0.0;
+        }
+
         let ms_per_beat = 60000.0 / self.bpm;
         let beats_per_bar = self.time_signature.beats_per_bar();
         ms_per_beat * beats_per_bar as f64 * self.bar_count as f64

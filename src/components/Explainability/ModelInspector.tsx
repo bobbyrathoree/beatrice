@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
-import { EventFeatures, EventClass, EVENT_CLASS_COLORS } from '../../types/explainability';
+import { EventClass, EVENT_CLASS_COLORS } from '../../types/explainability';
+import type { EventFeatures } from '../../types/visualization';
 
 interface ModelInspectorProps {
   features: EventFeatures;

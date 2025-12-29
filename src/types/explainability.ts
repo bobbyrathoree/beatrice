@@ -1,14 +1,8 @@
 // Types for explainability components - showing AI decision-making process
 
-export type EventClass = 'BilabialPlosive' | 'HihatNoise' | 'Click' | 'HumVoiced';
+import type { EventFeatures } from './visualization';
 
-export interface EventFeatures {
-  spectral_centroid: number;
-  zcr: number;
-  low_band_energy: number;
-  mid_band_energy: number;
-  high_band_energy: number;
-}
+export type EventClass = 'BilabialPlosive' | 'HihatNoise' | 'Click' | 'HumVoiced';
 
 export interface EventDecision {
   event_id: string;
