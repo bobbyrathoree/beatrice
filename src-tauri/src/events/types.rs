@@ -7,7 +7,6 @@ use uuid::Uuid;
 /// Classification of detected beatbox events
 /// Maps beatbox sounds to musical instruments/synthesis targets
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum EventClass {
     /// B/P sounds - bilabial plosives
     /// Triggers: synth bass + kick drum
@@ -32,23 +31,24 @@ pub enum EventClass {
 
 impl EventClass {
     /// Convert from string representation (for serialization)
+    /// Accepts both PascalCase and snake_case for backwards compatibility
     pub fn from_string(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "bilabial_plosive" => EventClass::BilabialPlosive,
-            "hihat_noise" => EventClass::HihatNoise,
-            "click" => EventClass::Click,
-            "hum_voiced" => EventClass::HumVoiced,
+        match s {
+            "BilabialPlosive" | "bilabial_plosive" => EventClass::BilabialPlosive,
+            "HihatNoise" | "hihat_noise" => EventClass::HihatNoise,
+            "Click" | "click" => EventClass::Click,
+            "HumVoiced" | "hum_voiced" => EventClass::HumVoiced,
             _ => EventClass::Click, // Default fallback
         }
     }
 
-    /// Convert to string representation
+    /// Convert to string representation (PascalCase for TypeScript compatibility)
     pub fn to_string(&self) -> &'static str {
         match self {
-            EventClass::BilabialPlosive => "bilabial_plosive",
-            EventClass::HihatNoise => "hihat_noise",
-            EventClass::Click => "click",
-            EventClass::HumVoiced => "hum_voiced",
+            EventClass::BilabialPlosive => "BilabialPlosive",
+            EventClass::HihatNoise => "HihatNoise",
+            EventClass::Click => "Click",
+            EventClass::HumVoiced => "HumVoiced",
         }
     }
 

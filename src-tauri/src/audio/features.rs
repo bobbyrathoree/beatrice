@@ -42,8 +42,8 @@ impl Default for OnsetConfig {
         OnsetConfig {
             window_size: 2048,
             hop_size: 512,
-            threshold_factor: 1.5,
-            min_onset_gap_ms: 30.0,
+            threshold_factor: 1.0, // Lowered from 1.5 to better detect B-sounds
+            min_onset_gap_ms: 25.0, // Reduced from 30.0 for faster sequences
         }
     }
 }
