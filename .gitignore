@@ -30,3 +30,6 @@ PHASE_*.md
 # Tauri
 src-tauri/WixTools/
 src-tauri/target/
+
+# Claude Code
+CLAUDE.md
