@@ -75,6 +75,8 @@ pub fn run() {
             commands::stop_recording,
             commands::is_recording,
             commands::get_recording_level,
+            commands::save_event_decisions,
+            commands::get_event_decisions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,22 +8,18 @@
  * NOTE: These are mock implementations that return dummy data or throw not-implemented errors.
  */
 
-// Check if we're running in Tauri or browser
 export const isTauriAvailable = (): boolean => {
   return typeof window !== 'undefined' && '__TAURI__' in window;
 };
 
-// Mock invoke function
 export const invoke = async <T = any>(command: string, args?: any): Promise<T> => {
   console.warn(`[Tauri Mock] Command '${command}' called in browser mode. Returning mock data.`, args);
 
-  // Return mock data based on command
   switch (command) {
     case 'greet':
       return `Hello ${args?.name || 'World'}!` as T;
 
     case 'list_projects':
-      // Return empty array - real sessions will appear when users record
       return [] as T;
 
     case 'get_project':
@@ -87,9 +83,8 @@ export const invoke = async <T = any>(command: string, args?: any): Promise<T> =
 
     case 'stop_recording':
       console.log('[Tauri Mock] Recording stopped (simulated)');
-      // Return mock audio data as base64
       return {
-        audio_data: new Array(44100).fill(0), // 1 second of silence
+        audio_data: new Array(44100).fill(0),
         sample_rate: 44100,
       } as T;
 
@@ -97,10 +92,10 @@ export const invoke = async <T = any>(command: string, args?: any): Promise<T> =
       return false as T;
 
     case 'get_recording_level':
-      return (Math.random() * 0.5) as T; // Random volume level
+      return (Math.random() * 0.5) as T;
 
     case 'detect_onsets':
-      return [0.5, 1.0, 1.5, 2.0, 2.5] as T; // Mock onset times
+      return [0.5, 1.0, 1.5, 2.0, 2.5] as T;
 
     case 'detect_events':
       return [
@@ -132,7 +127,7 @@ export const invoke = async <T = any>(command: string, args?: any): Promise<T> =
 
     case 'render_preview':
       console.log('[Tauri Mock] Audio preview render (simulated)');
-      return { audio_data: new Array(44100 * 2).fill(0) } as T; // 2 seconds of silence
+      return { audio_data: new Array(44100 * 2).fill(0) } as T;
 
     default:
       console.error(`[Tauri Mock] Unknown command: ${command}`);
@@ -140,7 +135,6 @@ export const invoke = async <T = any>(command: string, args?: any): Promise<T> =
   }
 };
 
-// Type for Tauri API
 export interface TauriAPI {
   invoke: typeof invoke;
   core: {
@@ -148,7 +142,6 @@ export interface TauriAPI {
   };
 }
 
-// Export a mock Tauri API object
 export const mockTauriAPI: TauriAPI = {
   invoke,
   core: {
@@ -156,25 +149,11 @@ export const mockTauriAPI: TauriAPI = {
   },
 };
 
-/**
- * Get the Tauri API (real or mock)
- *
- * Usage in your components:
- * ```typescript
- * import { getTauriAPI } from '@/utils/tauri-mock';
- *
- * const tauri = getTauriAPI();
- * const result = await tauri.invoke('command_name', { args });
- * ```
- */
 export const getTauriAPI = (): TauriAPI => {
   if (isTauriAvailable()) {
-    // Return real Tauri API
     return (window as any).__TAURI__;
-  } else {
-    // Return mock API for browser development
-    return mockTauriAPI;
   }
+  return mockTauriAPI;
 };
 
 export default {

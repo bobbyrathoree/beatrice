@@ -1,5 +1,6 @@
 // File system operations for storing artifacts and data
 use sha2::{Digest, Sha256};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -12,6 +13,8 @@ pub enum StorageError {
     Io(#[from] std::io::Error),
     #[error("Failed to get app data directory")]
     NoAppDataDir,
+    #[error("Failed to serialize/deserialize JSON: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;
@@ -103,6 +106,40 @@ pub fn calculate_sha256(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     hex::encode(hasher.finalize())
+}
+
+/// Store analysis results (EventDecisions) for a run
+pub fn store_analysis<T: Serialize>(
+    project_id: &Uuid,
+    run_id: &Uuid,
+    data: &T,
+) -> StorageResult<()> {
+    let run_dir = get_run_dir(project_id, run_id)?;
+    let file_path = run_dir.join("analysis.json");
+    
+    let json = serde_json::to_string_pretty(data)?;
+    let mut file = fs::File::create(&file_path)?;
+    file.write_all(json.as_bytes())?;
+    
+    Ok(())
+}
+
+/// Read analysis results for a run
+pub fn read_analysis<T: for<'a> Deserialize<'a>>(
+    project_id: &Uuid,
+    run_id: &Uuid,
+) -> StorageResult<Option<T>> {
+    let run_dir = get_run_dir(project_id, run_id)?;
+    let file_path = run_dir.join("analysis.json");
+    
+    if !file_path.exists() {
+        return Ok(None);
+    }
+    
+    let json = fs::read_to_string(&file_path)?;
+    let data = serde_json::from_str(&json)?;
+    
+    Ok(Some(data))
 }
 
 #[cfg(test)]

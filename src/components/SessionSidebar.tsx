@@ -31,14 +31,16 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
       if (diffDays < 7) return `${diffDays}d ago`;
 
       // Format: "Dec 29, 10:30 AM"
-      return date.toLocaleDateString(undefined, {
+      const dateStr = date.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
-      }) + ", " + date.toLocaleTimeString(undefined, {
+      });
+      const timeStr = date.toLocaleTimeString(undefined, {
         hour: "numeric",
         minute: "2-digit",
         hour12: true,
       });
+      return `${dateStr}, ${timeStr}`;
     } catch {
       return "Unknown";
     }
@@ -54,24 +56,22 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
   };
 
   return (
-    <>
-      {/* Sidebar */}
-      <motion.aside
-        className={`session-sidebar ${isCollapsed ? "collapsed" : ""}`}
-        initial={false}
-        animate={{
-          width: isCollapsed ? "60px" : "320px",
-        }}
-        transition={{ duration: 0.3, ease: "easeInOut" }}
+    <motion.aside
+      className={`session-sidebar ${isCollapsed ? "collapsed" : ""}`}
+      initial={false}
+      animate={{
+        width: isCollapsed ? "60px" : "320px",
+      }}
+      transition={{ duration: 0.3, ease: "easeInOut" }}
+    >
+      {/* Toggle Button */}
+      <button
+        className="sidebar-toggle"
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
-        {/* Toggle Button */}
-        <button
-          className="sidebar-toggle"
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <span className="toggle-icon">{isCollapsed ? "▶" : "◀"}</span>
-        </button>
+        <span className="toggle-icon">{isCollapsed ? "▶" : "◀"}</span>
+      </button>
 
         {/* Sidebar Content */}
         <AnimatePresence mode="wait">
@@ -165,6 +165,5 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
           </motion.div>
         )}
       </motion.aside>
-    </>
   );
 }

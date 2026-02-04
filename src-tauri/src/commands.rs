@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::arranger::{self, ArrangementTemplate, Arrangement, MidiExportOptions};
 use crate::audio::{self, AudioData, OnsetConfig};
-use crate::events::{self, Event, EventClass, EventFeatures};
+use crate::events::{self, Event, EventClass, EventDecision, EventFeatures};
 use crate::groove::{self, TempoEstimate, Grid, GridDivision, GrooveFeel, TimeSignature, QuantizeSettings, QuantizedEvent};
 use crate::pipeline::{TraceBuilder, TraceWriter};
 use crate::state::{
@@ -797,6 +797,90 @@ pub fn export_midi_command(input: ExportMidiInput) -> CommandResult<Vec<u8>> {
         })?;
 
     Ok(midi_bytes)
+}
+
+// ==================== EXPLAINABILITY COMMANDS ====================
+
+#[derive(Debug, Deserialize)]
+pub struct SaveEventDecisionsInput {
+    pub run_id: String,
+    pub events: Vec<EventData>,
+    pub quantized_events: Option<Vec<QuantizedEvent>>,
+    pub arrangement: Option<Arrangement>,
+}
+
+#[tauri::command]
+pub fn save_event_decisions(
+    db: State<'_, DbConnection>,
+    input: SaveEventDecisionsInput,
+) -> CommandResult<()> {
+    let run_id = Uuid::parse_str(&input.run_id).map_err(|e| CommandError::from(e))?;
+
+    // Get project ID from run
+    let run = state::get_run(&db, &run_id)
+        .map_err(|e| CommandError::from(e))?
+        .ok_or_else(|| CommandError {
+            message: "Run not found".to_string(),
+        })?;
+
+    // Create lookup for quantized events
+    let quantized_lookup: std::collections::HashMap<Uuid, &QuantizedEvent> =
+        if let Some(ref q_events) = input.quantized_events {
+            q_events
+                .iter()
+                .map(|qe| (qe.original_event.id, qe))
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+
+    // Build decisions
+    let mut decisions = Vec::new();
+
+    for event_data in &input.events {
+        // Convert EventData to Event
+        let id = Uuid::parse_str(&event_data.id).unwrap_or_else(|_| Uuid::new_v4());
+        let event = Event {
+            id,
+            timestamp_ms: event_data.timestamp_ms,
+            duration_ms: event_data.duration_ms,
+            class: EventClass::from_string(&event_data.class),
+            confidence: event_data.confidence,
+            features: event_data.features.clone(),
+        };
+
+        let quantized = quantized_lookup.get(&id).copied();
+        let arrangement = input.arrangement.as_ref();
+
+        let decision = EventDecision::from_pipeline_data(&event, quantized, arrangement);
+        decisions.push(decision);
+    }
+
+    // Store analysis
+    state::storage::store_analysis(&run.project_id, &run_id, &decisions)
+        .map_err(|e| CommandError::from(e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_event_decisions(
+    db: State<'_, DbConnection>,
+    run_id: String,
+) -> CommandResult<Vec<EventDecision>> {
+    let run_id = Uuid::parse_str(&run_id).map_err(|e| CommandError::from(e))?;
+
+    let run = state::get_run(&db, &run_id)
+        .map_err(|e| CommandError::from(e))?
+        .ok_or_else(|| CommandError {
+            message: "Run not found".to_string(),
+        })?;
+
+    let decisions = state::storage::read_analysis(&run.project_id, &run_id)
+        .map_err(|e| CommandError::from(e))?
+        .unwrap_or_else(Vec::new);
+
+    Ok(decisions)
 }
 
 // ==================== THEME COMMANDS ====================

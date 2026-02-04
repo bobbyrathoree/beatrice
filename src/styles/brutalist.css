@@ -199,18 +199,10 @@ h6 { font-size: 0.75rem; }
   border-color: var(--color-fg);
 }
 
-.btn-primary:hover {
-  background: var(--color-fg);
-}
-
 .btn-secondary {
   background: var(--color-accent);
   color: var(--color-bg);
   border-color: var(--color-fg);
-}
-
-.btn-secondary:hover {
-  background: var(--color-fg);
 }
 
 .btn-stop {
@@ -219,14 +211,16 @@ h6 { font-size: 0.75rem; }
   border-color: var(--color-fg);
 }
 
-.btn-stop:hover {
-  background: var(--color-fg);
-}
-
 .btn-success {
   background: var(--color-success);
   color: var(--color-fg);
   border-color: var(--color-fg);
+}
+
+.btn-primary:hover,
+.btn-secondary:hover,
+.btn-stop:hover {
+  background: var(--color-fg);
 }
 
 .btn-demo {
