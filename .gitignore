@@ -31,5 +31,14 @@ PHASE_*.md
 src-tauri/WixTools/
 src-tauri/target/
 
+# Playwright
+playwright.config.ts
+tests/
+test-results/
+playwright-report/
+
+# Test recordings
+test-recording.wav
+
 # Claude Code
 CLAUDE.md
