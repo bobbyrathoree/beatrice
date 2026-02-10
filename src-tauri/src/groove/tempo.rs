@@ -246,13 +246,14 @@ fn select_best_tempo(
     let interval_ms = min_interval_ms + (best_bin as f64 * bin_width);
 
     // Calculate confidence based on peak strength relative to histogram mean
-    // Guard against empty histogram
+    // Guard against empty histogram and non-finite values
     let confidence = if histogram.is_empty() {
         0.0
     } else {
         let histogram_mean: f32 = histogram.iter().sum::<f32>() / histogram.len() as f32;
-        if histogram_mean > 0.0 {
-            (peak_strength / (histogram_mean * 3.0)).min(1.0)
+        if histogram_mean > 0.0 && peak_strength.is_finite() {
+            let raw = peak_strength / (histogram_mean * 3.0);
+            if raw.is_finite() { raw.min(1.0) } else { 0.0 }
         } else {
             0.0
         }

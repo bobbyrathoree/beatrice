@@ -189,7 +189,10 @@ pub fn arrange_events(
         match event.original_event.class {
             EventClass::BilabialPlosive => {
                 // B/P sounds -> Kick + potentially bass synth
-                let velocity = calculate_velocity(event.original_event.confidence, 90, 110);
+                let velocity = calculate_velocity(
+                    event.original_event.confidence,
+                    event.original_event.features.peak_amplitude,
+                );
 
                 // Always add to kick lane if it matches template kick positions
                 if should_place_on_beat(&event.grid_position, &rules.kick_positions, grid) {
@@ -210,7 +213,10 @@ pub fn arrange_events(
 
             EventClass::Click => {
                 // T/K sounds -> Snare/Clap
-                let velocity = calculate_velocity(event.original_event.confidence, 85, 105);
+                let velocity = calculate_velocity(
+                    event.original_event.confidence,
+                    event.original_event.features.peak_amplitude,
+                );
 
                 if should_place_on_beat(&event.grid_position, &rules.snare_positions, grid) {
                     snare_lane.add_note(ArrangedNote::from_quantized_event(event, velocity));
@@ -219,7 +225,10 @@ pub fn arrange_events(
 
             EventClass::HihatNoise => {
                 // S/TS sounds -> Hi-hats
-                let velocity = calculate_velocity(event.original_event.confidence, 70, 95);
+                let velocity = calculate_velocity(
+                    event.original_event.confidence,
+                    event.original_event.features.peak_amplitude,
+                );
 
                 // Hi-hats follow density pattern
                 if should_place_hihat(&event.grid_position, &rules.hihat_density) {
@@ -229,7 +238,10 @@ pub fn arrange_events(
 
             EventClass::HumVoiced => {
                 // Voiced sounds -> Pads
-                let velocity = calculate_velocity(event.original_event.confidence, 60, 80);
+                let velocity = calculate_velocity(
+                    event.original_event.confidence,
+                    event.original_event.features.peak_amplitude,
+                );
 
                 pad_lane.add_note(ArrangedNote::new(
                     event.quantized_timestamp_ms,
@@ -258,12 +270,22 @@ pub fn arrange_events(
     arrangement
 }
 
-/// Calculate MIDI velocity based on confidence score
-fn calculate_velocity(confidence: f32, min_velocity: u8, max_velocity: u8) -> u8 {
-    let normalized = confidence.clamp(0.0, 1.0);
-    let range = (max_velocity - min_velocity) as f32;
-    let velocity = min_velocity as f32 + (normalized * range);
-    velocity as u8
+/// Calculate MIDI velocity based on confidence and peak amplitude
+///
+/// Blends confidence (30%) with peak amplitude (70%) so that louder
+/// beatbox sounds produce louder MIDI notes while still rewarding
+/// confident classifications. The result is mapped to a configurable
+/// MIDI velocity range (default 60-127 for dynamic but always-audible output).
+fn calculate_velocity(confidence: f32, peak_amplitude: f32) -> u8 {
+    let conf = confidence.clamp(0.0, 1.0);
+    let amp = peak_amplitude.clamp(0.0, 1.0);
+    let factor = (conf * 0.3 + amp * 0.7).clamp(0.0, 1.0);
+
+    // Map to MIDI velocity range 60-127
+    let min_velocity: f32 = 60.0;
+    let max_velocity: f32 = 127.0;
+    let velocity = min_velocity + factor * (max_velocity - min_velocity);
+    (velocity as u8).clamp(1, 127)
 }
 
 /// Check if an event should be placed on a specific beat based on template positions
@@ -349,9 +371,18 @@ mod tests {
 
     #[test]
     fn test_calculate_velocity() {
-        assert_eq!(calculate_velocity(0.0, 64, 127), 64);
-        assert_eq!(calculate_velocity(1.0, 64, 127), 127);
-        assert_eq!(calculate_velocity(0.5, 64, 127), 95);
+        // Zero confidence and zero amplitude -> minimum velocity (60)
+        assert_eq!(calculate_velocity(0.0, 0.0), 60);
+        // Max confidence and max amplitude -> maximum velocity (127)
+        assert_eq!(calculate_velocity(1.0, 1.0), 127);
+        // Loud hit with moderate confidence:
+        //   factor = 0.5 * 0.3 + 0.8 * 0.7 = 0.15 + 0.56 = 0.71
+        //   velocity = 60 + 0.71 * 67 = 60 + 47.57 = 107
+        assert_eq!(calculate_velocity(0.5, 0.8), 107);
+        // Quiet hit with high confidence:
+        //   factor = 0.9 * 0.3 + 0.2 * 0.7 = 0.27 + 0.14 = 0.41
+        //   velocity = 60 + 0.41 * 67 = 60 + 27.47 = 87
+        assert_eq!(calculate_velocity(0.9, 0.2), 87);
     }
 
     #[test]

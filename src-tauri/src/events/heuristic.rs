@@ -331,6 +331,7 @@ mod tests {
             low_band_energy: 0.7,
             mid_band_energy: 0.2,
             high_band_energy: 0.1,
+            peak_amplitude: 0.8,
         };
 
         let result = classifier.classify(&features);
@@ -349,6 +350,7 @@ mod tests {
             low_band_energy: 0.05,
             mid_band_energy: 0.25,
             high_band_energy: 0.7,
+            peak_amplitude: 0.6,
         };
 
         let result = classifier.classify(&features);
@@ -367,6 +369,7 @@ mod tests {
             low_band_energy: 0.2,
             mid_band_energy: 0.6,
             high_band_energy: 0.2,
+            peak_amplitude: 0.7,
         };
 
         let result = classifier.classify(&features);
@@ -386,6 +389,7 @@ mod tests {
             low_band_energy: 0.3,      // Balanced - not dominant
             mid_band_energy: 0.45,     // Mid-band dominant (voice formants)
             high_band_energy: 0.25,    // Some high harmonics
+            peak_amplitude: 0.5,
         };
 
         let result = classifier.classify(&features);
@@ -407,6 +411,7 @@ mod tests {
             low_band_energy: 0.42,     // Strong but not dominant
             mid_band_energy: 0.40,     // Vowel formants
             high_band_energy: 0.18,    // Some high harmonics
+            peak_amplitude: 0.75,
         };
 
         let result = classifier.classify(&features);
@@ -424,6 +429,7 @@ mod tests {
             low_band_energy: 0.3,
             mid_band_energy: 0.4,
             high_band_energy: 0.3,
+            peak_amplitude: 0.6,
         };
 
         let result = classifier.classify(&features);

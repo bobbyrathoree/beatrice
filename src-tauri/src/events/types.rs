@@ -86,6 +86,10 @@ pub struct EventFeatures {
     /// Energy in high frequency band (2000+ Hz)
     /// Normalized to [0, 1] relative to total energy
     pub high_band_energy: f32,
+
+    /// Peak amplitude of the audio segment [0.0, 1.0]
+    /// Used for velocity/dynamics: louder sounds produce louder MIDI notes
+    pub peak_amplitude: f32,
 }
 
 impl EventFeatures {
@@ -97,6 +101,7 @@ impl EventFeatures {
             low_band_energy: 0.0,
             mid_band_energy: 0.0,
             high_band_energy: 0.0,
+            peak_amplitude: 0.0,
         }
     }
 
@@ -182,6 +187,7 @@ mod tests {
             low_band_energy: 0.5,
             mid_band_energy: 0.3,
             high_band_energy: 0.2,
+            peak_amplitude: 0.5,
         };
 
         let f2 = EventFeatures {
@@ -190,6 +196,7 @@ mod tests {
             low_band_energy: 0.5,
             mid_band_energy: 0.3,
             high_band_energy: 0.2,
+            peak_amplitude: 0.8,
         };
 
         // Identical features should have zero distance

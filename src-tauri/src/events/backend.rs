@@ -127,6 +127,7 @@ mod tests {
             low_band_energy: 0.7,
             mid_band_energy: 0.2,
             high_band_energy: 0.1,
+            peak_amplitude: 0.8,
         };
 
         let result = classifier.classify(&features);

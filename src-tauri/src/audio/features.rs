@@ -33,8 +33,16 @@ pub struct OnsetConfig {
     pub threshold_factor: f32,
 
     /// Minimum time between onsets in milliseconds
-    /// Prevents duplicate detections
+    /// Prevents duplicate detections within a single beat
+    /// A typical beatbox "ba" sound lasts 100-200ms, so this should be
+    /// large enough to avoid detecting sub-events within a single beat
     pub min_onset_gap_ms: f64,
+
+    /// Minimum spectral flux value required for an onset candidate.
+    /// Frames with flux below this absolute threshold are ignored
+    /// regardless of the adaptive threshold. This gates out low-energy
+    /// noise between beats.
+    pub min_flux_threshold: f32,
 }
 
 impl Default for OnsetConfig {
@@ -42,8 +50,9 @@ impl Default for OnsetConfig {
         OnsetConfig {
             window_size: 2048,
             hop_size: 512,
-            threshold_factor: 1.0, // Lowered from 1.5 to better detect B-sounds
-            min_onset_gap_ms: 25.0, // Reduced from 30.0 for faster sequences
+            threshold_factor: 2.5, // Require flux to be 2.5 std devs above mean
+            min_onset_gap_ms: 90.0, // ~90ms minimum gap prevents sub-event triggers
+            min_flux_threshold: 0.0, // Computed dynamically if left at 0.0
         }
     }
 }
@@ -58,6 +67,9 @@ pub fn extract_features(
         return EventFeatures::zero();
     }
 
+    // Calculate peak amplitude (loudness indicator for velocity/dynamics)
+    let peak_amplitude = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+
     // Calculate Zero-Crossing Rate
     let zcr = calculate_zcr(samples);
 
@@ -71,6 +83,7 @@ pub fn extract_features(
         low_band_energy: band_energies[0],
         mid_band_energy: band_energies[1],
         high_band_energy: band_energies[2],
+        peak_amplitude,
     }
 }
 
@@ -332,7 +345,29 @@ fn pick_onset_peaks(
     let mean = flux.iter().sum::<f32>() / flux.len() as f32;
     let variance = flux.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / flux.len() as f32;
     let std_dev = variance.sqrt();
-    let threshold = mean + config.threshold_factor * std_dev;
+    let adaptive_threshold = mean + config.threshold_factor * std_dev;
+
+    // Compute a minimum flux gate: if the caller did not set one (0.0),
+    // derive one from the median flux so that low-energy noise frames
+    // are never promoted to onsets. The median is more robust than the
+    // mean because it is not skewed by a few loud transients.
+    let min_flux = if config.min_flux_threshold > 0.0 {
+        config.min_flux_threshold
+    } else {
+        let mut sorted_flux: Vec<f32> = flux.iter().copied().filter(|&v| v > 0.0).collect();
+        if sorted_flux.is_empty() {
+            0.0
+        } else {
+            sorted_flux.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median = sorted_flux[sorted_flux.len() / 2];
+            // Require at least 2x the median non-zero flux as an absolute floor
+            median * 2.0
+        }
+    };
+
+    // The effective threshold is the higher of the adaptive threshold
+    // and the minimum flux gate
+    let threshold = adaptive_threshold.max(min_flux);
 
     let mut onsets = Vec::new();
     let hop_size = config.hop_size;

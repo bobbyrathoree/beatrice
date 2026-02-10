@@ -6,6 +6,7 @@ export interface EventFeatures {
   low_band_energy: number;
   mid_band_energy: number;
   high_band_energy: number;
+  peak_amplitude: number;
 }
 
 export interface DetectedEvent {

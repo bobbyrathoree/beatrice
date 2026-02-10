@@ -166,7 +166,7 @@ export function GrooveControls({
               }}
             >
               <div style={{ fontSize: '24px', fontWeight: 'bold', lineHeight: 1 }}>
-                {Math.round(confidence * 100)}%
+                {isNaN(confidence) ? 0 : Math.round(confidence * 100)}%
               </div>
               <div style={{ fontSize: '12px', fontWeight: 'bold' }}>CONFIDENCE</div>
             </div>

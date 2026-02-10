@@ -63,6 +63,14 @@ export function ModelInspector({ features, className, confidence }: ModelInspect
       max: 1,
       description: 'Energy in high frequencies',
     },
+    {
+      key: 'peak_amplitude',
+      label: 'Peak Amplitude',
+      value: features.peak_amplitude,
+      unit: '',
+      max: 1,
+      description: 'Loudness of the sound (drives MIDI velocity)',
+    },
   ];
 
   return (
