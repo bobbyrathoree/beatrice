@@ -50,7 +50,7 @@ impl Default for OnsetConfig {
         OnsetConfig {
             window_size: 2048,
             hop_size: 512,
-            threshold_factor: 2.5, // Require flux to be 2.5 std devs above mean
+            threshold_factor: 2.0, // Require flux to be 2.0 std devs above mean
             min_onset_gap_ms: 90.0, // ~90ms minimum gap prevents sub-event triggers
             min_flux_threshold: 0.0, // Computed dynamically if left at 0.0
         }
@@ -360,8 +360,8 @@ fn pick_onset_peaks(
         } else {
             sorted_flux.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let median = sorted_flux[sorted_flux.len() / 2];
-            // Require at least 2x the median non-zero flux as an absolute floor
-            median * 2.0
+            // Require at least 1.2x the median non-zero flux as an absolute floor
+            median * 1.2
         }
     };
 

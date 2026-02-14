@@ -298,12 +298,18 @@ impl HeuristicClassifier {
         // Penalty: If low-band is dominant (> 0.4) with low centroid,
         // this is likely a plosive, not a hum - reduce HumVoiced score
         if f.low_band_energy > 0.4 && f.spectral_centroid < 800.0 {
-            final_score *= 0.6; // 40% penalty
+            final_score *= 0.4; // 60% penalty
         }
 
         // Penalty: If energy is concentrated in low+mid (typical plosive pattern)
         if f.low_band_energy + f.mid_band_energy > 0.75 && f.high_band_energy < 0.25 {
             final_score *= 0.7; // 30% penalty
+        }
+
+        // Penalty: Extremely low ZCR suggests a pure tone / sine sweep,
+        // not a voiced hum (hums have some ZCR variation from harmonics)
+        if f.zcr < 0.05 {
+            final_score *= 0.5; // 50% penalty
         }
 
         final_score
