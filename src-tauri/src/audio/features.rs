@@ -70,6 +70,11 @@ pub fn extract_features(
     // Calculate peak amplitude (loudness indicator for velocity/dynamics)
     let peak_amplitude = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
 
+    // Calculate RMS and crest factor (peak/RMS)
+    // High crest factor = transient (plosive), low = sustained (hum)
+    let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+    let crest_factor = if rms > 1e-6 { peak_amplitude / rms } else { 0.0 };
+
     // Calculate Zero-Crossing Rate
     let zcr = calculate_zcr(samples);
 
@@ -84,6 +89,7 @@ pub fn extract_features(
         mid_band_energy: band_energies[1],
         high_band_energy: band_energies[2],
         peak_amplitude,
+        crest_factor,
     }
 }
 
@@ -168,6 +174,9 @@ fn compute_fft(samples: &[f32]) -> Vec<f32> {
 }
 
 /// Calculate spectral centroid (center of mass of spectrum)
+/// Uses energy (magnitude²) weighting to emphasize peaks over noise floor.
+/// Without energy weighting, broadband noise across ~1000 FFT bins overwhelms
+/// the few concentrated signal peaks, pulling the centroid to ~Nyquist/2.
 /// Returns frequency in Hz
 fn calculate_spectral_centroid(spectrum: &[f32], sample_rate: u32, window_size: usize) -> f32 {
     // Guard against zero window size
@@ -176,18 +185,19 @@ fn calculate_spectral_centroid(spectrum: &[f32], sample_rate: u32, window_size: 
     }
 
     let mut weighted_sum = 0.0;
-    let mut total_magnitude = 0.0;
+    let mut total_energy = 0.0;
 
     let bin_width = sample_rate as f32 / window_size as f32;
 
     for (i, &magnitude) in spectrum.iter().enumerate() {
+        let energy = magnitude * magnitude;
         let frequency = i as f32 * bin_width;
-        weighted_sum += frequency * magnitude;
-        total_magnitude += magnitude;
+        weighted_sum += frequency * energy;
+        total_energy += energy;
     }
 
-    if total_magnitude > 0.0 {
-        weighted_sum / total_magnitude
+    if total_energy > 0.0 {
+        weighted_sum / total_energy
     } else {
         0.0
     }
@@ -209,8 +219,11 @@ fn calculate_band_energies(spectrum: &[f32], sample_rate: u32, window_size: usiz
     }
 
     // Define band boundaries
-    let low_max_hz = 200.0;
-    let mid_max_hz = 2000.0;
+    // Low band captures beatbox kick fundamentals (80-400Hz) and voiced sounds
+    // Mid band captures snare/click transients and upper harmonics
+    // High band captures hi-hat/cymbal noise
+    let low_max_hz = 500.0;
+    let mid_max_hz = 4000.0;
 
     let low_max_bin = (low_max_hz / bin_width) as usize;
     let mid_max_bin = (mid_max_hz / bin_width) as usize;
@@ -253,17 +266,52 @@ pub fn detect_onsets(audio: &AudioData, config: &OnsetConfig) -> Vec<Onset> {
         return Vec::new();
     }
 
+    // Check for energy at the very start of the audio.
+    // The spectral flux detector misses onsets at t=0 because flux requires
+    // a previous frame to compute the difference. If the first few ms have
+    // significant energy, inject an onset at t=0.
+    let leading_onset = detect_leading_onset(&mono, audio.sample_rate);
+
     // Compute spectral flux across all frames
     let flux = compute_spectral_flux(&mono, audio.sample_rate, config);
 
     if flux.is_empty() {
-        return Vec::new();
+        return leading_onset.into_iter().collect();
     }
 
     // Apply adaptive threshold to pick onset peaks
-    let onsets = pick_onset_peaks(&flux, audio.sample_rate, config);
+    let mut onsets = pick_onset_peaks(&flux, audio.sample_rate, config);
+
+    // Prepend the leading onset if it doesn't overlap with the first detected onset
+    if let Some(leading) = leading_onset {
+        let too_close = onsets.first().map_or(false, |first| first.timestamp_ms < config.min_onset_gap_ms);
+        if !too_close {
+            onsets.insert(0, leading);
+        }
+    }
 
     onsets
+}
+
+/// Check if audio starts with significant energy (onset at t=0).
+/// Returns Some(Onset) if the RMS of the first 10ms exceeds a threshold.
+fn detect_leading_onset(mono: &[f32], sample_rate: u32) -> Option<Onset> {
+    let window_samples = (sample_rate as f64 * 0.01) as usize; // 10ms
+    if mono.len() < window_samples || window_samples == 0 {
+        return None;
+    }
+
+    let rms: f32 = (mono[..window_samples].iter().map(|s| s * s).sum::<f32>() / window_samples as f32).sqrt();
+
+    // Threshold: if the first 10ms has RMS > 0.02, there's an onset at t=0
+    if rms > 0.02 {
+        Some(Onset {
+            timestamp_ms: 0.0,
+            strength: (rms * 10.0).min(1.0), // normalize roughly
+        })
+    } else {
+        None
+    }
 }
 
 /// Compute spectral flux for all frames

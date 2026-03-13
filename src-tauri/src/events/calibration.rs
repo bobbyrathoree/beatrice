@@ -220,7 +220,7 @@ mod tests {
             low_band_energy: 0.5,
             mid_band_energy: 0.3,
             high_band_energy: 0.2,
-            peak_amplitude: 0.5,
+            peak_amplitude: 0.5, crest_factor: 3.0,
         }
     }
 

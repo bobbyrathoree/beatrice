@@ -3,11 +3,11 @@
 
 use tauri::Manager;
 
-mod arranger;
-mod audio;
+pub mod arranger;
+pub mod audio;
 mod commands;
-mod events;
-mod groove;
+pub mod events;
+pub mod groove;
 mod pipeline;
 mod render;
 mod state;

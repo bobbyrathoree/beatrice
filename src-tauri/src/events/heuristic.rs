@@ -91,14 +91,14 @@ impl HeuristicClassifier {
 
     /// Score for BilabialPlosive (B/P sounds → kick + synth bass)
     /// Characteristics:
-    /// - Low spectral centroid (< 800 Hz - relaxed for vowel formants)
-    /// - Strong low-band energy (> 0.35 - realistic for "ba" with vowel)
-    /// - Low to moderate ZCR (voiced but with attack)
+    /// - Low spectral centroid (< 800 Hz)
+    /// - Strong low-band energy (> 0.35)
+    /// - Low to moderate ZCR
+    /// - High crest factor (transient attack, fast decay)
     fn score_bilabial_plosive(&self, f: &EventFeatures) -> f32 {
         let mut score = 0.0;
 
         // Spectral centroid - relaxed thresholds for real "ba" sounds
-        // Real B-sounds have formants that push centroid higher (400-800 Hz typical)
         let centroid_score = if f.spectral_centroid < 500.0 {
             1.0
         } else if f.spectral_centroid < 800.0 {
@@ -112,8 +112,7 @@ impl HeuristicClassifier {
         };
         score += centroid_score * self.config.centroid_weight;
 
-        // Low-band energy - adjusted for real "ba" (vowels split energy)
-        // Real "ba" has low_band ~0.35-0.5 because formants are in mid band
+        // Low-band energy
         let low_energy_score = if f.low_band_energy > 0.45 {
             1.0
         } else if f.low_band_energy > 0.35 {
@@ -137,17 +136,22 @@ impl HeuristicClassifier {
         };
         score += zcr_score * self.config.zcr_weight;
 
-        // Bonus: If low + mid is strong (typical for "ba"), boost score
-        if f.low_band_energy + f.mid_band_energy > 0.7 && f.high_band_energy < 0.3 {
-            score += 0.3;
-        }
-
-        // Normalize by total weight (plus bonus possibility)
+        // Normalize by total weight
         let total_weight = self.config.centroid_weight
             + self.config.energy_weight
             + self.config.zcr_weight;
 
-        (score / total_weight).min(1.0).max(0.0)
+        let mut final_score = (score / total_weight).min(1.0).max(0.0);
+
+        // Crest factor: plosives are transient (high crest factor > 3.0)
+        // Penalize if the signal is sustained (low crest factor < 2.5)
+        if f.crest_factor > 0.0 && f.crest_factor < 2.5 {
+            final_score *= 0.45; // Sustained sounds are unlikely plosives
+        } else if f.crest_factor >= 3.5 {
+            final_score *= 1.1; // Boost for clearly transient signals
+        }
+
+        final_score.min(1.0).max(0.0)
     }
 
     /// Score for HihatNoise (S/SH/TS sounds → hi-hats)
@@ -254,39 +258,43 @@ impl HeuristicClassifier {
     /// Characteristics:
     /// - Variable spectral centroid (depends on pitch)
     /// - Low ZCR (< 0.15) - periodic/harmonic content
-    /// - Sustained energy across time
-    /// - Not strongly concentrated in any single band
+    /// - Sustained energy (low crest factor)
+    /// - Centroid in voice range (200-1500 Hz)
     fn score_hum_voiced(&self, f: &EventFeatures) -> f32 {
         let mut score = 0.0;
 
         // ZCR - should be low (harmonic content)
-        let zcr_score = if f.zcr < 0.1 {
+        let zcr_score = if f.zcr < 0.12 {
             1.0
-        } else if f.zcr < 0.15 {
-            0.8
-        } else if f.zcr < 0.25 {
-            0.5
+        } else if f.zcr < 0.2 {
+            0.7
+        } else if f.zcr < 0.3 {
+            0.4
         } else {
-            0.2
+            0.15
         };
         score += zcr_score * self.config.zcr_weight;
 
-        // Energy distribution - prefer more balanced (not too concentrated)
-        let energy_balance = 1.0 - (f.low_band_energy - 0.33).abs()
-            - (f.mid_band_energy - 0.33).abs()
-            - (f.high_band_energy - 0.33).abs();
-        let balance_score = energy_balance.max(0.0);
-        score += balance_score * self.config.energy_weight;
-
-        // Centroid - prefer mid-low range (typical voice fundamental)
+        // Centroid - prefer voice fundamental range (200-1500 Hz)
         let centroid_score = if f.spectral_centroid > 200.0 && f.spectral_centroid < 1000.0 {
             1.0
         } else if f.spectral_centroid < 1500.0 {
             0.7
         } else {
-            0.4
+            0.3
         };
         score += centroid_score * self.config.centroid_weight;
+
+        // Energy in low+mid bands (voice energy lives here)
+        let voice_energy = f.low_band_energy + f.mid_band_energy;
+        let energy_score = if voice_energy > 0.7 {
+            0.9
+        } else if voice_energy > 0.5 {
+            0.7
+        } else {
+            0.3
+        };
+        score += energy_score * self.config.energy_weight;
 
         // Normalize by total weight
         let total_weight = self.config.centroid_weight
@@ -295,24 +303,15 @@ impl HeuristicClassifier {
 
         let mut final_score = (score / total_weight).min(1.0).max(0.0);
 
-        // Penalty: If low-band is dominant (> 0.4) with low centroid,
-        // this is likely a plosive, not a hum - reduce HumVoiced score
-        if f.low_band_energy > 0.4 && f.spectral_centroid < 800.0 {
-            final_score *= 0.4; // 60% penalty
+        // Crest factor is the KEY discriminator vs BilabialPlosive.
+        // Hums are sustained (low crest factor < 2.5), plosives are transient (> 3.5).
+        if f.crest_factor > 0.0 && f.crest_factor < 2.5 {
+            final_score *= 1.4; // Strong boost for clearly sustained signals
+        } else if f.crest_factor >= 3.5 {
+            final_score *= 0.35; // Heavy penalty for transient signals
         }
 
-        // Penalty: If energy is concentrated in low+mid (typical plosive pattern)
-        if f.low_band_energy + f.mid_band_energy > 0.75 && f.high_band_energy < 0.25 {
-            final_score *= 0.7; // 30% penalty
-        }
-
-        // Penalty: Extremely low ZCR suggests a pure tone / sine sweep,
-        // not a voiced hum (hums have some ZCR variation from harmonics)
-        if f.zcr < 0.05 {
-            final_score *= 0.5; // 50% penalty
-        }
-
-        final_score
+        final_score.min(1.0).max(0.0)
     }
 }
 
@@ -337,7 +336,7 @@ mod tests {
             low_band_energy: 0.7,
             mid_band_energy: 0.2,
             high_band_energy: 0.1,
-            peak_amplitude: 0.8,
+            peak_amplitude: 0.8, crest_factor: 3.0,
         };
 
         let result = classifier.classify(&features);
@@ -356,7 +355,7 @@ mod tests {
             low_band_energy: 0.05,
             mid_band_energy: 0.25,
             high_band_energy: 0.7,
-            peak_amplitude: 0.6,
+            peak_amplitude: 0.6, crest_factor: 3.0,
         };
 
         let result = classifier.classify(&features);
@@ -375,7 +374,7 @@ mod tests {
             low_band_energy: 0.2,
             mid_band_energy: 0.6,
             high_band_energy: 0.2,
-            peak_amplitude: 0.7,
+            peak_amplitude: 0.7, crest_factor: 3.0,
         };
 
         let result = classifier.classify(&features);
@@ -395,7 +394,7 @@ mod tests {
             low_band_energy: 0.3,      // Balanced - not dominant
             mid_band_energy: 0.45,     // Mid-band dominant (voice formants)
             high_band_energy: 0.25,    // Some high harmonics
-            peak_amplitude: 0.5,
+            peak_amplitude: 0.5, crest_factor: 1.5,  // Sustained sound
         };
 
         let result = classifier.classify(&features);
@@ -417,7 +416,7 @@ mod tests {
             low_band_energy: 0.42,     // Strong but not dominant
             mid_band_energy: 0.40,     // Vowel formants
             high_band_energy: 0.18,    // Some high harmonics
-            peak_amplitude: 0.75,
+            peak_amplitude: 0.75, crest_factor: 4.0,  // Transient plosive attack
         };
 
         let result = classifier.classify(&features);
@@ -435,7 +434,7 @@ mod tests {
             low_band_energy: 0.3,
             mid_band_energy: 0.4,
             high_band_energy: 0.3,
-            peak_amplitude: 0.6,
+            peak_amplitude: 0.6, crest_factor: 3.0,
         };
 
         let result = classifier.classify(&features);

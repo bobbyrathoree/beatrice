@@ -33,12 +33,14 @@ src-tauri/target/
 
 # Playwright
 playwright.config.ts
-tests/
+/tests/
 test-results/
 playwright-report/
+.playwright-cli/
 
-# Test recordings
+# Test recordings and generated test audio
 test-recording.wav
+test-audio/
 
 # Claude Code
 CLAUDE.md

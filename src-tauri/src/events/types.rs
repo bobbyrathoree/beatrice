@@ -90,6 +90,12 @@ pub struct EventFeatures {
     /// Peak amplitude of the audio segment [0.0, 1.0]
     /// Used for velocity/dynamics: louder sounds produce louder MIDI notes
     pub peak_amplitude: f32,
+
+    /// Crest factor: peak_amplitude / RMS. Higher values indicate transient sounds
+    /// (plosives, clicks), lower values indicate sustained sounds (hums, vowels).
+    /// Typical ranges: plosive ~4-10, sustained hum ~1.2-2.0
+    #[serde(default)]
+    pub crest_factor: f32,
 }
 
 impl EventFeatures {
@@ -102,6 +108,7 @@ impl EventFeatures {
             mid_band_energy: 0.0,
             high_band_energy: 0.0,
             peak_amplitude: 0.0,
+            crest_factor: 0.0,
         }
     }
 
@@ -187,7 +194,7 @@ mod tests {
             low_band_energy: 0.5,
             mid_band_energy: 0.3,
             high_band_energy: 0.2,
-            peak_amplitude: 0.5,
+            peak_amplitude: 0.5, crest_factor: 3.0,
         };
 
         let f2 = EventFeatures {
@@ -196,7 +203,7 @@ mod tests {
             low_band_energy: 0.5,
             mid_band_energy: 0.3,
             high_band_energy: 0.2,
-            peak_amplitude: 0.8,
+            peak_amplitude: 0.8, crest_factor: 3.0,
         };
 
         // Identical features should have zero distance

@@ -175,6 +175,16 @@ function App() {
       throw new Error("Invalid file path: path is empty or undefined");
     }
 
+    // In browser mock mode, retrieve audio from the mock's in-memory store
+    if (path.startsWith('mock://')) {
+      const { getMockAudioData } = await import("./utils/tauri-mock");
+      const data = getMockAudioData();
+      if (!data?.length) {
+        throw new Error("No mock audio data available");
+      }
+      return data;
+    }
+
     try {
       const { readFile, exists } = await import("@tauri-apps/plugin-fs");
 
