@@ -171,10 +171,16 @@ fn test_pattern_classification() {
     let onsets = audio::detect_onsets(&audio, &config);
 
     let classifier = HeuristicClassifier::new();
-    let window_duration_ms = 50.0;
 
     let mut events = Vec::new();
-    for onset in &onsets {
+    for (i, onset) in onsets.iter().enumerate() {
+        let duration_ms = if i + 1 < onsets.len() {
+            onsets[i + 1].timestamp_ms - onset.timestamp_ms
+        } else {
+            audio.duration_ms as f64 - onset.timestamp_ms
+        };
+        let window_duration_ms = duration_ms.clamp(50.0, 500.0);
+
         let features = audio::extract_features_for_window(&audio, onset.timestamp_ms, window_duration_ms);
         let result = classifier.classify(&features);
 
@@ -186,23 +192,18 @@ fn test_pattern_classification() {
         events.push((onset.timestamp_ms, result.class, result.confidence));
     }
 
-    // Expected sequence with the 50ms feature window:
-    // Kick sounds appear as HumVoiced because the 50ms window captures
-    // the transient before it decays, yielding a low crest factor.
-    // This is a KNOWN LIMITATION of the hardcoded 50ms window —
-    // a dynamic window based on onset-to-onset distance would fix this.
-    //
-    // With full-file analysis, kicks correctly classify as BilabialPlosive
-    // (see test_kick_classifies_as_bilabial_plosive).
-    let expected_with_50ms_window = [
-        EventClass::HumVoiced,       // kick at t=0 (50ms window: low crest)
+    // Expected sequence with the dynamic feature window:
+    // The dynamic window properly captures the full decay of the transient,
+    // allowing crest_factor to correctly classify Plosives.
+    let expected_classes = [
+        EventClass::BilabialPlosive, // kick at t=0
         EventClass::HihatNoise,      // hihat
         EventClass::Click,           // snare
-        EventClass::HumVoiced,       // kick at t=1.5s (50ms window: low crest)
+        EventClass::BilabialPlosive, // kick at t=1.5s
     ];
 
     if events.len() >= 4 {
-        for (i, &expected_class) in expected_with_50ms_window.iter().enumerate() {
+        for (i, &expected_class) in expected_classes.iter().enumerate() {
             assert_eq!(events[i].1, expected_class,
                 "Event {} at {:.1}ms: expected {:?}, got {:?}",
                 i, events[i].0, expected_class, events[i].1);
@@ -244,16 +245,16 @@ fn test_pattern_full_pipeline() {
 
     // Step 2: Classify events
     let classifier = HeuristicClassifier::new();
-    let window_duration_ms = 50.0;
     let mut events = Vec::new();
     for (i, onset) in onsets.iter().enumerate() {
-        let features = audio::extract_features_for_window(&audio, onset.timestamp_ms, window_duration_ms);
-        let result = classifier.classify(&features);
         let duration_ms = if i + 1 < onsets.len() {
             onsets[i + 1].timestamp_ms - onset.timestamp_ms
         } else {
             audio.duration_ms as f64 - onset.timestamp_ms
         };
+        let window_duration_ms = duration_ms.clamp(50.0, 500.0);
+        let features = audio::extract_features_for_window(&audio, onset.timestamp_ms, window_duration_ms);
+        let result = classifier.classify(&features);
         let event = events::Event::new(onset.timestamp_ms, duration_ms, result.class, result.confidence, features);
         events.push(event);
     }

@@ -470,9 +470,18 @@ pub async fn detect_events(
 
     // Classify each onset
     let mut events = Vec::new();
-    let window_duration_ms = 50.0; // 50ms window for feature extraction
 
     for (i, onset) in onsets.iter().enumerate() {
+        // Calculate duration (to next onset or end of audio)
+        let duration_ms = if i + 1 < onsets.len() {
+            onsets[i + 1].timestamp_ms - onset.timestamp_ms
+        } else {
+            audio.duration_ms as f64 - onset.timestamp_ms
+        };
+
+        // Dynamic feature window based on onset-to-onset distance, clamped [50ms, 500ms]
+        let window_duration_ms = duration_ms.clamp(50.0, 500.0);
+
         // Extract features for this onset
         let features =
             audio::extract_features_for_window(&audio, onset.timestamp_ms, window_duration_ms);
@@ -485,13 +494,6 @@ pub async fn detect_events(
             (result.class, result.confidence)
         } else {
             (EventClass::Click, 0.5) // Fallback
-        };
-
-        // Calculate duration (to next onset or end of audio)
-        let duration_ms = if i + 1 < onsets.len() {
-            onsets[i + 1].timestamp_ms - onset.timestamp_ms
-        } else {
-            audio.duration_ms as f64 - onset.timestamp_ms
         };
 
         let event = Event::new(onset.timestamp_ms, duration_ms, class, confidence, features);
