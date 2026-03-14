@@ -31,12 +31,12 @@ export interface Theme {
 
 interface ThemeSelectorProps {
   onThemeChange: (theme: Theme | null) => void;
+  activeThemeName?: string;
   disabled?: boolean;
 }
 
-export function ThemeSelector({ onThemeChange, disabled = false }: ThemeSelectorProps) {
+export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false }: ThemeSelectorProps) {
   const [themes, setThemes] = useState<ThemeSummary[]>([]);
-  const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,6 +51,11 @@ export function ThemeSelector({ onThemeChange, disabled = false }: ThemeSelector
       setError(null);
       const themesData = await invoke<ThemeSummary[]>('list_themes');
       setThemes(themesData);
+      
+      // If no theme is active, automatically select the first one to avoid unselected state
+      if (!activeThemeName && themesData.length > 0) {
+        selectTheme(themesData[0].name);
+      }
     } catch (err) {
       console.error('Failed to load themes:', err);
       setError('Failed to load themes');
@@ -61,16 +66,13 @@ export function ThemeSelector({ onThemeChange, disabled = false }: ThemeSelector
 
   const selectTheme = async (themeName: string) => {
     try {
-      // If clicking the same theme, deselect
-      if (selectedTheme === themeName) {
-        setSelectedTheme(null);
-        onThemeChange(null);
-        return;
+      // If clicking the same theme, deselect (unless it's the only way to re-trigger)
+      if (activeThemeName === themeName) {
+        return; // Prevent deselecting, let's keep one always selected
       }
 
       const theme = await invoke<Theme | null>('get_theme', { name: themeName });
       if (theme) {
-        setSelectedTheme(themeName);
         onThemeChange(theme);
       }
     } catch (err) {
@@ -179,7 +181,7 @@ export function ThemeSelector({ onThemeChange, disabled = false }: ThemeSelector
         }}
       >
         {themes.map((theme) => {
-          const isSelected = selectedTheme === theme.name;
+          const isSelected = activeThemeName === theme.name;
           const themeColor = getThemeColor(theme.name);
 
           return (
@@ -295,7 +297,7 @@ export function ThemeSelector({ onThemeChange, disabled = false }: ThemeSelector
       </div>
 
       {/* Selected theme info */}
-      {selectedTheme && (
+      {activeThemeName && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
@@ -314,12 +316,12 @@ export function ThemeSelector({ onThemeChange, disabled = false }: ThemeSelector
               width: '12px',
               height: '12px',
               borderRadius: '50%',
-              backgroundColor: getThemeColor(selectedTheme),
+              backgroundColor: getThemeColor(activeThemeName),
               border: '2px solid #000',
             }}
           />
           <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-            ACTIVE THEME: {selectedTheme}
+            ACTIVE THEME: {activeThemeName}
           </div>
         </motion.div>
       )}

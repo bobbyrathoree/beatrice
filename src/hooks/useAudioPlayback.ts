@@ -420,7 +420,37 @@ function scheduleNote(
 
 // ---- Main hook ----
 
-export function useAudioPlayback() {
+function calculateArrangementDuration(arrangement: any, bpm: number): number {
+  const arr = arrangement as Record<string, any>;
+  let totalDurationMs = 0;
+
+  if (typeof arr.total_duration_ms === 'number' && arr.total_duration_ms > 0) {
+    totalDurationMs = arr.total_duration_ms;
+  } else {
+    // Fallback to searching lanes
+    const checkLanes = (lane: any) => {
+      if (!lane || !Array.isArray(lane.events)) return;
+      for (const note of lane.events) {
+        const endMs = note.timestamp_ms + note.duration_ms;
+        if (endMs > totalDurationMs) totalDurationMs = endMs;
+      }
+    };
+
+    if (Array.isArray(arr.drum_lanes)) arr.drum_lanes.forEach(checkLanes);
+    checkLanes(arr.bass_lane);
+    checkLanes(arr.pad_lane);
+    checkLanes(arr.arp_lane);
+  }
+
+  if (totalDurationMs <= 0) {
+    const barCount = typeof arr.bar_count === 'number' ? arr.bar_count : 4;
+    totalDurationMs = (barCount * 4 * 60 * 1000) / bpm;
+  }
+
+  return (totalDurationMs / 1000) * 4; // Song Mode: 4 loops
+}
+
+export function useAudioPlayback(initialArrangement?: any, initialBpm?: number) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -429,6 +459,15 @@ export function useAudioPlayback() {
   const rafRef = useRef<number | null>(null);
   const playStartRef = useRef<number>(0);
   const durationRef = useRef<number>(0);
+
+  // Update duration when arrangement or BPM changes
+  useEffect(() => {
+    if (initialArrangement) {
+      const dur = calculateArrangementDuration(initialArrangement, initialBpm || 120);
+      setDuration(dur);
+      durationRef.current = dur;
+    }
+  }, [initialArrangement, initialBpm]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -560,31 +599,11 @@ export function useAudioPlayback() {
       return;
     }
 
-    // Calculate total duration
-    let totalDurationMs = 0;
-    if (typeof arr.total_duration_ms === 'number') {
-      totalDurationMs = arr.total_duration_ms;
-    }
-    if (totalDurationMs <= 0) {
-      for (const lane of lanes) {
-        for (const note of lane.events) {
-          const endMs = note.timestamp_ms + note.duration_ms;
-          if (endMs > totalDurationMs) {
-            totalDurationMs = endMs;
-          }
-        }
-      }
-    }
-    if (totalDurationMs <= 0) {
-      const barCount = typeof arr.bar_count === 'number' ? arr.bar_count : 4;
-      totalDurationMs = (barCount * 4 * 60 * 1000) / bpm;
-    }
-
-    const totalDurationSec = totalDurationMs / 1000;
+    const songDurationSec = calculateArrangementDuration(arr, bpm);
+    const loopDurationSec = songDurationSec / 4;
     
-    // Song Mode: Loop 4 times with dynamic muting
-    durationRef.current = totalDurationSec * 4;
-    setDuration(totalDurationSec * 4);
+    durationRef.current = songDurationSec;
+    setDuration(songDurationSec);
 
     // Create a fresh AudioContext
     const ctx = new AudioContext();
@@ -602,7 +621,7 @@ export function useAudioPlayback() {
     playStartRef.current = startTime;
 
     for (let loopIdx = 0; loopIdx < 4; loopIdx++) {
-      const loopOffset = loopIdx * totalDurationSec;
+      const loopOffset = loopIdx * loopDurationSec;
       
       for (const lane of lanes) {
         const laneName = lane.name.toUpperCase();
@@ -631,7 +650,7 @@ export function useAudioPlayback() {
           
           // Adjust velocity for loop 3 (outro fade)
           if (loopIdx === 3 && laneName.includes('BASS')) {
-            const fadeRatio = 1.0 - (note.timestamp_ms / totalDurationMs);
+            const fadeRatio = 1.0 - (note.timestamp_ms / (loopDurationSec * 1000));
             noteCopy.velocity = Math.floor(note.velocity * Math.max(0.2, fadeRatio));
           }
           

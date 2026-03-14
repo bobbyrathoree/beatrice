@@ -229,21 +229,30 @@ export function BEmphasisSlider({ value, onChange, disabled = false }: BEmphasis
           marginTop: '4px',
         }}
       >
-        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (
-          <motion.div
-            key={i}
-            animate={{
-              backgroundColor: i / 10 <= localValue ? color : '#E0E0E0',
-              opacity: i / 10 <= localValue ? 1 : 0.3,
-            }}
-            style={{
-              flex: 1,
-              height: '100%',
-              border: '1px solid #000',
-              borderRadius: '2px',
-            }}
-          />
-        ))}
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => {
+          const isActive = i / 10 <= localValue;
+          return (
+            <motion.div
+              key={i}
+              animate={{
+                backgroundColor: isActive ? color : '#E0E0E0',
+                opacity: isActive ? 1 : 0.3,
+                scaleY: isActive && isDragging ? [1, 1.4, 1] : 1,
+                boxShadow: isActive ? `0 0 10px ${color}66` : 'none',
+              }}
+              transition={{
+                scaleY: { repeat: Infinity, duration: 0.4, delay: i * 0.05 },
+                backgroundColor: { duration: 0.2 }
+              }}
+              style={{
+                flex: 1,
+                height: '100%',
+                border: '1px solid #000',
+                borderRadius: '2px',
+              }}
+            />
+          );
+        })}
       </div>
     </motion.div>
   );

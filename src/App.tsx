@@ -121,7 +121,10 @@ function App() {
   const hasEnteredResultsRef = useRef(false);
 
   // Audio playback
-  const { isPlaying, currentTime, duration, play: playAudio, stop: stopAudio } = useAudioPlayback();
+  const { isPlaying, currentTime, duration, play: playAudio, stop: stopAudio } = useAudioPlayback(
+    pipelineResult?.arrangement,
+    gridSettings.bpm
+  );
 
   // Stop playback when arrangement changes (after re-arrange)
   useEffect(() => {
@@ -727,12 +730,14 @@ function App() {
 
       {/* App Body - Contains Sidebar and Main Content */}
       <div className="app-body">
-        {/* Session Sidebar */}
-        <SessionSidebar
-          onSessionSelect={handleSessionSelect}
-          onRunSelect={handleRunSelect}
-          refreshKey={sidebarRefreshKey}
-        />
+        {/* Session Sidebar - hidden in results view to focus on the performance */}
+        {state !== "results" && (
+          <SessionSidebar
+            onSessionSelect={handleSessionSelect}
+            onRunSelect={handleRunSelect}
+            refreshKey={sidebarRefreshKey}
+          />
+        )}
 
         {/* Main Content */}
         <main className="main">
@@ -885,12 +890,13 @@ function App() {
                     duration={duration}
                     onPlay={() => playAudio(pipelineResult.arrangement, gridSettings.bpm)}
                     onStop={stopAudio}
+                    theme={selectedTheme}
                   />
                 </motion.div>
               )}
 
               {/* Event Timeline */}
-              {pipelineResult && pipelineResult.events.length > 0 && (
+              {pipelineResult?.events && pipelineResult.events.length > 0 && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -899,6 +905,7 @@ function App() {
                   <Timeline
                     events={eventDecisions}
                     onEventClick={handleEventClick}
+                    maxDuration={pipelineResult.arrangement?.total_duration_ms || undefined}
                   />
                 </motion.div>
               )}
@@ -911,6 +918,7 @@ function App() {
               >
                 <ThemeSelector
                   onThemeChange={handleThemeChange}
+                  activeThemeName={selectedTheme?.name || pipelineParams.theme}
                   disabled={false}
                 />
               </motion.div>
