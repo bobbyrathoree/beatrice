@@ -2,6 +2,13 @@
 //
 // Synthesizes kick, snare, hi-hat, bass, and pad sounds using the Web Audio API.
 // Schedules all notes from an Arrangement and tracks playback progress.
+//
+// Sound design philosophy: Every sound should have character and depth.
+// - Kicks should feel like they hit your chest
+// - Hi-hats should shimmer with metallic overtones
+// - Snares should crack with body and noise
+// - Bass should be warm with movement
+// - Pads should breathe and evolve
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 
@@ -20,18 +27,13 @@ interface DrumLane {
   events: ArrangedNote[];
 }
 
-// The Rust Arrangement struct serializes (via serde) with fields:
-//   drum_lanes: DrumLane[], bass_lane: DrumLane|null, pad_lane: DrumLane|null,
-//   arp_lane: DrumLane|null, template: string, total_duration_ms: number,
-//   bar_count: number
-// The App.tsx simplified Arrangement uses: tracks: Array<{ name, events }>
-// The play() function handles both shapes via Record<string, unknown>.
-
 // ---- Synthesis helpers ----
 
-/** Convert MIDI velocity (0-127) to gain (0.0-1.0) */
+/** Convert MIDI velocity (0-127) to gain (0.0-1.0) with a musical curve */
 function velocityToGain(velocity: number): number {
-  return Math.max(0, Math.min(1, velocity / 127));
+  const linear = Math.max(0, Math.min(1, velocity / 127));
+  // Slightly exponential curve for more musical dynamics
+  return linear * linear * 0.8 + linear * 0.2;
 }
 
 /** Convert MIDI note number to frequency in Hz */
@@ -51,6 +53,29 @@ function createNoiseBuffer(ctx: AudioContext, durationSec: number): AudioBuffer 
   return buffer;
 }
 
+// ---- Master bus (sidechain ducking target) ----
+
+let masterGain: GainNode | null = null;
+let sidechainDuckTimes: number[] = [];
+
+function getMasterBus(ctx: AudioContext): GainNode {
+  if (!masterGain || masterGain.context !== ctx) {
+    masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.85, ctx.currentTime);
+    masterGain.connect(ctx.destination);
+    sidechainDuckTimes = [];
+  }
+  return masterGain;
+}
+
+function scheduleSidechainDuck(ctx: AudioContext, time: number) {
+  const master = getMasterBus(ctx);
+  // Quick duck on kick hits — the signature "pumping" feel
+  master.gain.setValueAtTime(0.85, time);
+  master.gain.linearRampToValueAtTime(0.4, time + 0.005);  // 5ms attack
+  master.gain.linearRampToValueAtTime(0.85, time + 0.12);  // 120ms release
+}
+
 // ---- Individual instrument schedulers ----
 
 function scheduleKick(
@@ -59,23 +84,64 @@ function scheduleKick(
   velocity: number,
 ): void {
   const gain = velocityToGain(velocity);
+  const master = getMasterBus(ctx);
 
-  // Sine oscillator: 150Hz -> 60Hz sweep
-  const osc = ctx.createOscillator();
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(150, time);
-  osc.frequency.exponentialRampToValueAtTime(60, time + 0.05);
+  // === Layer 1: Sub-bass body (sine, 150→45Hz pitch sweep) ===
+  const subOsc = ctx.createOscillator();
+  subOsc.type = 'sine';
+  subOsc.frequency.setValueAtTime(150, time);
+  subOsc.frequency.exponentialRampToValueAtTime(45, time + 0.08);
 
-  // Gain envelope: fast attack, exponential decay
-  const gainNode = ctx.createGain();
-  gainNode.gain.setValueAtTime(gain, time);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
+  const subGain = ctx.createGain();
+  subGain.gain.setValueAtTime(gain * 0.9, time);
+  subGain.gain.setValueAtTime(gain * 0.9, time + 0.02);  // brief sustain
+  subGain.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
 
-  osc.connect(gainNode);
-  gainNode.connect(ctx.destination);
+  subOsc.connect(subGain);
+  subGain.connect(master);
+  subOsc.start(time);
+  subOsc.stop(time + 0.45);
 
-  osc.start(time);
-  osc.stop(time + 0.35);
+  // === Layer 2: Click transient (triangle burst for attack definition) ===
+  const clickOsc = ctx.createOscillator();
+  clickOsc.type = 'triangle';
+  clickOsc.frequency.setValueAtTime(3500, time);
+  clickOsc.frequency.exponentialRampToValueAtTime(200, time + 0.02);
+
+  const clickGain = ctx.createGain();
+  clickGain.gain.setValueAtTime(gain * 0.35, time);
+  clickGain.gain.exponentialRampToValueAtTime(0.001, time + 0.025);
+
+  clickOsc.connect(clickGain);
+  clickGain.connect(master);
+  clickOsc.start(time);
+  clickOsc.stop(time + 0.03);
+
+  // === Layer 3: Harmonic warmth (slightly overdriven sine) ===
+  const harmOsc = ctx.createOscillator();
+  harmOsc.type = 'sine';
+  harmOsc.frequency.setValueAtTime(90, time);
+
+  const waveshaper = ctx.createWaveShaper();
+  const curve = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const x = (i / 128) - 1;
+    curve[i] = Math.tanh(x * 2); // soft saturation
+  }
+  waveshaper.curve = curve;
+
+  const harmGain = ctx.createGain();
+  harmGain.gain.setValueAtTime(gain * 0.2, time);
+  harmGain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
+
+  harmOsc.connect(waveshaper);
+  waveshaper.connect(harmGain);
+  harmGain.connect(master);
+  harmOsc.start(time);
+  harmOsc.stop(time + 0.3);
+
+  // Trigger sidechain duck on the master bus
+  scheduleSidechainDuck(ctx, time);
 }
 
 function scheduleSnare(
@@ -84,41 +150,64 @@ function scheduleSnare(
   velocity: number,
 ): void {
   const gain = velocityToGain(velocity);
+  const master = getMasterBus(ctx);
 
-  // Noise component through bandpass
+  // === Layer 1: Noise burst through bandpass (the "crack") ===
   const noiseBuffer = createNoiseBuffer(ctx, 0.2);
   const noiseSrc = ctx.createBufferSource();
   noiseSrc.buffer = noiseBuffer;
 
   const bandpass = ctx.createBiquadFilter();
   bandpass.type = 'bandpass';
-  bandpass.frequency.setValueAtTime(2000, time);
-  bandpass.Q.setValueAtTime(1, time);
+  bandpass.frequency.setValueAtTime(3500, time);
+  bandpass.frequency.exponentialRampToValueAtTime(2000, time + 0.1);
+  bandpass.Q.setValueAtTime(0.8, time);
+
+  // Highpass to remove muddiness
+  const hipass = ctx.createBiquadFilter();
+  hipass.type = 'highpass';
+  hipass.frequency.setValueAtTime(200, time);
 
   const noiseGain = ctx.createGain();
-  noiseGain.gain.setValueAtTime(gain * 0.8, time);
-  noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
+  noiseGain.gain.setValueAtTime(gain * 0.65, time);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
 
   noiseSrc.connect(bandpass);
-  bandpass.connect(noiseGain);
-  noiseGain.connect(ctx.destination);
+  bandpass.connect(hipass);
+  hipass.connect(noiseGain);
+  noiseGain.connect(master);
 
-  // Sine body at 200Hz
-  const osc = ctx.createOscillator();
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(200, time);
+  // === Layer 2: Tonal body (sine + triangle at ~200Hz) ===
+  const bodyOsc = ctx.createOscillator();
+  bodyOsc.type = 'triangle';
+  bodyOsc.frequency.setValueAtTime(220, time);
+  bodyOsc.frequency.exponentialRampToValueAtTime(120, time + 0.04);
 
   const bodyGain = ctx.createGain();
   bodyGain.gain.setValueAtTime(gain * 0.5, time);
-  bodyGain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+  bodyGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
 
-  osc.connect(bodyGain);
-  bodyGain.connect(ctx.destination);
+  bodyOsc.connect(bodyGain);
+  bodyGain.connect(master);
+
+  // === Layer 3: Ring / resonance (gives character) ===
+  const ringOsc = ctx.createOscillator();
+  ringOsc.type = 'sine';
+  ringOsc.frequency.setValueAtTime(180, time);
+
+  const ringGain = ctx.createGain();
+  ringGain.gain.setValueAtTime(gain * 0.12, time);
+  ringGain.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+
+  ringOsc.connect(ringGain);
+  ringGain.connect(master);
 
   noiseSrc.start(time);
   noiseSrc.stop(time + 0.2);
-  osc.start(time);
-  osc.stop(time + 0.15);
+  bodyOsc.start(time);
+  bodyOsc.stop(time + 0.1);
+  ringOsc.start(time);
+  ringOsc.stop(time + 0.15);
 }
 
 function scheduleHihat(
@@ -127,26 +216,50 @@ function scheduleHihat(
   velocity: number,
 ): void {
   const gain = velocityToGain(velocity);
+  const master = getMasterBus(ctx);
 
-  // White noise through highpass
-  const noiseBuffer = createNoiseBuffer(ctx, 0.08);
+  // === Metallic shimmer: multiple detuned square waves through highpass ===
+  // Real hi-hats are metal discs vibrating at inharmonic frequencies
+  const metallicFreqs = [3742, 4835, 5917, 7264, 8476];
+  const totalGainNode = ctx.createGain();
+  totalGainNode.gain.setValueAtTime(gain * 0.3, time);
+  totalGainNode.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
+
+  const hipass = ctx.createBiquadFilter();
+  hipass.type = 'highpass';
+  hipass.frequency.setValueAtTime(7000, time);
+
+  for (const freq of metallicFreqs) {
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(freq, time);
+    osc.connect(totalGainNode);
+    osc.start(time);
+    osc.stop(time + 0.08);
+  }
+
+  // === Noise layer for air ===
+  const noiseBuffer = createNoiseBuffer(ctx, 0.06);
   const noiseSrc = ctx.createBufferSource();
   noiseSrc.buffer = noiseBuffer;
 
-  const highpass = ctx.createBiquadFilter();
-  highpass.type = 'highpass';
-  highpass.frequency.setValueAtTime(8000, time);
+  const noiseHipass = ctx.createBiquadFilter();
+  noiseHipass.type = 'highpass';
+  noiseHipass.frequency.setValueAtTime(9000, time);
 
-  const gainNode = ctx.createGain();
-  gainNode.gain.setValueAtTime(gain * 0.4, time);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(gain * 0.25, time);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
 
-  noiseSrc.connect(highpass);
-  highpass.connect(gainNode);
-  gainNode.connect(ctx.destination);
+  totalGainNode.connect(hipass);
+  hipass.connect(master);
+
+  noiseSrc.connect(noiseHipass);
+  noiseHipass.connect(noiseGain);
+  noiseGain.connect(master);
 
   noiseSrc.start(time);
-  noiseSrc.stop(time + 0.08);
+  noiseSrc.stop(time + 0.06);
 }
 
 function scheduleBass(
@@ -159,29 +272,54 @@ function scheduleBass(
   const gain = velocityToGain(velocity);
   const freq = midiToFreq(midiNote);
   const durSec = Math.max(0.05, durationMs / 1000);
+  const master = getMasterBus(ctx);
 
-  // Sawtooth oscillator
-  const osc = ctx.createOscillator();
-  osc.type = 'sawtooth';
-  osc.frequency.setValueAtTime(freq, time);
+  // === Dual detuned sawtooth oscillators for width ===
+  const osc1 = ctx.createOscillator();
+  osc1.type = 'sawtooth';
+  osc1.frequency.setValueAtTime(freq, time);
 
-  // Lowpass filter
+  const osc2 = ctx.createOscillator();
+  osc2.type = 'sawtooth';
+  osc2.frequency.setValueAtTime(freq * 1.005, time); // slight detune for warmth
+
+  // === Sub oscillator (one octave down, sine for weight) ===
+  const subOsc = ctx.createOscillator();
+  subOsc.type = 'sine';
+  subOsc.frequency.setValueAtTime(freq / 2, time);
+
+  // === Filter with envelope (the sweep that gives bass its character) ===
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(800, time);
-  filter.Q.setValueAtTime(1, time);
+  filter.frequency.setValueAtTime(freq * 6, time);      // open
+  filter.frequency.exponentialRampToValueAtTime(freq * 1.5, time + durSec * 0.6); // close
+  filter.Q.setValueAtTime(2, time);
 
-  // Gain envelope
+  // Amplitude envelope
   const gainNode = ctx.createGain();
-  gainNode.gain.setValueAtTime(gain * 0.6, time);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, time + Math.min(durSec, 0.3));
+  gainNode.gain.setValueAtTime(0.001, time);
+  gainNode.gain.linearRampToValueAtTime(gain * 0.5, time + 0.008);  // fast attack
+  gainNode.gain.setValueAtTime(gain * 0.5, time + durSec * 0.7);    // sustain
+  gainNode.gain.exponentialRampToValueAtTime(0.001, time + durSec);  // release
 
-  osc.connect(filter);
+  const subGain = ctx.createGain();
+  subGain.gain.setValueAtTime(gain * 0.3, time);
+  subGain.gain.exponentialRampToValueAtTime(0.001, time + durSec);
+
+  osc1.connect(filter);
+  osc2.connect(filter);
   filter.connect(gainNode);
-  gainNode.connect(ctx.destination);
+  gainNode.connect(master);
 
-  osc.start(time);
-  osc.stop(time + durSec + 0.05);
+  subOsc.connect(subGain);
+  subGain.connect(master);
+
+  osc1.start(time);
+  osc1.stop(time + durSec + 0.05);
+  osc2.start(time);
+  osc2.stop(time + durSec + 0.05);
+  subOsc.start(time);
+  subOsc.stop(time + durSec + 0.05);
 }
 
 function schedulePad(
@@ -193,33 +331,52 @@ function schedulePad(
 ): void {
   const gain = velocityToGain(velocity);
   const freq = midiToFreq(midiNote);
-  const durSec = Math.max(0.1, durationMs / 1000);
+  const durSec = Math.max(0.2, durationMs / 1000);
+  const master = getMasterBus(ctx);
 
-  // Square wave
-  const osc = ctx.createOscillator();
-  osc.type = 'square';
-  osc.frequency.setValueAtTime(freq, time);
+  // === Lush pad: 4 detuned oscillators with slow LFO modulation ===
+  const detunes = [-7, -3, 3, 7]; // cents of detuning for chorus effect
+  const oscTypes: OscillatorType[] = ['sawtooth', 'square', 'sawtooth', 'square'];
 
-  // Lowpass filter with envelope
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(1200, time);
-  filter.frequency.exponentialRampToValueAtTime(400, time + durSec * 0.8);
-  filter.Q.setValueAtTime(2, time);
+  const padBus = ctx.createGain();
+  padBus.gain.setValueAtTime(0.001, time);
+  padBus.gain.linearRampToValueAtTime(gain * 0.22, time + 0.15);    // slow attack
+  padBus.gain.setValueAtTime(gain * 0.22, time + durSec * 0.8);     // sustain
+  padBus.gain.exponentialRampToValueAtTime(0.001, time + durSec);    // release
 
-  // Gain envelope with sustain
-  const gainNode = ctx.createGain();
-  gainNode.gain.setValueAtTime(0.001, time);
-  gainNode.gain.linearRampToValueAtTime(gain * 0.35, time + 0.02); // fast attack
-  gainNode.gain.setValueAtTime(gain * 0.35, time + durSec * 0.6);  // sustain
-  gainNode.gain.exponentialRampToValueAtTime(0.001, time + durSec); // release
+  // Slow filter sweep for movement
+  const padFilter = ctx.createBiquadFilter();
+  padFilter.type = 'lowpass';
+  padFilter.frequency.setValueAtTime(1500, time);
+  padFilter.frequency.linearRampToValueAtTime(800, time + durSec * 0.5);
+  padFilter.frequency.linearRampToValueAtTime(1200, time + durSec);
+  padFilter.Q.setValueAtTime(1.5, time);
 
-  osc.connect(filter);
-  filter.connect(gainNode);
-  gainNode.connect(ctx.destination);
+  for (let i = 0; i < 4; i++) {
+    const osc = ctx.createOscillator();
+    osc.type = oscTypes[i];
+    osc.frequency.setValueAtTime(freq, time);
+    osc.detune.setValueAtTime(detunes[i], time);
 
-  osc.start(time);
-  osc.stop(time + durSec + 0.05);
+    // Slow vibrato via LFO
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(0.3 + i * 0.15, time); // slightly different rates
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.setValueAtTime(3 + i, time); // subtle pitch wobble in cents
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.detune);
+
+    osc.connect(padFilter);
+    lfo.start(time);
+    lfo.stop(time + durSec + 0.1);
+    osc.start(time);
+    osc.stop(time + durSec + 0.1);
+  }
+
+  padFilter.connect(padBus);
+  padBus.connect(master);
 }
 
 // ---- Instrument routing by lane name ----
@@ -245,7 +402,7 @@ function scheduleNote(
   } else if (name.includes('PAD') || name.includes('ARP') || name.includes('SYNTH')) {
     schedulePad(ctx, noteTime, note.velocity, midiNote, note.duration_ms);
   } else {
-    // Fallback: treat as a generic percussion hit (snare-like)
+    // Fallback: treat as a generic percussion hit
     scheduleSnare(ctx, noteTime, note.velocity);
   }
 }
@@ -281,7 +438,6 @@ export function useAudioPlayback() {
 
     const elapsed = ctxRef.current.currentTime - playStartRef.current;
     if (elapsed >= durationRef.current) {
-      // Playback finished naturally
       setCurrentTime(durationRef.current);
       setIsPlaying(false);
       return;
@@ -310,18 +466,15 @@ export function useAudioPlayback() {
   }, [isPlaying, tick]);
 
   const stop = useCallback(() => {
-    // Cancel animation frame
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-
-    // Close and discard context to stop all scheduled audio
     if (ctxRef.current) {
       ctxRef.current.close().catch(() => {});
       ctxRef.current = null;
     }
-
+    masterGain = null;
     setIsPlaying(false);
     setCurrentTime(0);
   }, []);
@@ -336,15 +489,13 @@ export function useAudioPlayback() {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+    masterGain = null;
 
     // Interpret the arrangement
-    // The arrangement may come as either the Rust-serialized format or the
-    // simplified TS format used in App.tsx. Handle both.
     const arr = arrangement as Record<string, unknown>;
     const lanes: Array<{ name: string; midi_note: number; events: ArrangedNote[] }> = [];
 
     if (Array.isArray(arr.drum_lanes)) {
-      // Rust serde format
       const drumLanes = arr.drum_lanes as DrumLane[];
       for (const lane of drumLanes) {
         if (lane.events.length > 0) {
@@ -364,16 +515,14 @@ export function useAudioPlayback() {
         lanes.push(arpLane);
       }
     } else if (Array.isArray(arr.tracks)) {
-      // Simplified TS format from App.tsx Arrangement interface
       const tracks = arr.tracks as Array<{ name: string; events: unknown[] }>;
       for (const track of tracks) {
         if (track.events.length > 0) {
           lanes.push({
             name: track.name,
-            midi_note: 36, // default
+            midi_note: 36,
             events: track.events.map((ev: unknown) => {
               const e = ev as Record<string, unknown>;
-              // Handle both QuantizedEvent (nested) and direct ArrangedNote shapes
               if (e.event && typeof e.event === 'object') {
                 const inner = e.event as Record<string, unknown>;
                 return {
@@ -400,13 +549,12 @@ export function useAudioPlayback() {
       return;
     }
 
-    // Calculate total duration from arrangement or BPM
+    // Calculate total duration
     let totalDurationMs = 0;
     if (typeof arr.total_duration_ms === 'number') {
       totalDurationMs = arr.total_duration_ms;
     }
     if (totalDurationMs <= 0) {
-      // Fallback: find the latest note end time
       for (const lane of lanes) {
         for (const note of lane.events) {
           const endMs = note.timestamp_ms + note.duration_ms;
@@ -417,10 +565,7 @@ export function useAudioPlayback() {
       }
     }
     if (totalDurationMs <= 0) {
-      // Last resort: use bar_count and bpm
-      const barCount = typeof arr.bar_count === 'number'
-        ? arr.bar_count
-        : 4;
+      const barCount = typeof arr.bar_count === 'number' ? arr.bar_count : 4;
       totalDurationMs = (barCount * 4 * 60 * 1000) / bpm;
     }
 
@@ -432,13 +577,15 @@ export function useAudioPlayback() {
     const ctx = new AudioContext();
     ctxRef.current = ctx;
 
-    // Handle browser autoplay policy
     if (ctx.state === 'suspended') {
       ctx.resume().catch(() => {});
     }
 
+    // Initialize master bus
+    getMasterBus(ctx);
+
     // Schedule all notes
-    const startTime = ctx.currentTime + 0.05; // small buffer
+    const startTime = ctx.currentTime + 0.05;
     playStartRef.current = startTime;
 
     for (const lane of lanes) {
