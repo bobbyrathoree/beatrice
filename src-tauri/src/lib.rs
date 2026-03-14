@@ -11,7 +11,7 @@ pub mod groove;
 mod pipeline;
 mod render;
 mod state;
-mod themes;
+pub mod themes;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

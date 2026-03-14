@@ -66,12 +66,21 @@ fn main() {
             format!("{:?}", qe.original_event.class), qe.original_event.timestamp_ms, qe.quantized_timestamp_ms, qe.snap_delta_ms);
     }
 
-    let arr = arranger::arrange_events(&quantized, &ArrangementTemplate::SynthwaveStraight, &grid, 0.6);
+    let theme = beatrice_lib::themes::get_theme("BLADE RUNNER").expect("Theme not found");
+    let arr = arranger::arrange_events(&quantized, &ArrangementTemplate::SynthwaveStraight, &grid, &theme, 0.6);
     let total: usize = arr.all_lanes().iter().map(|l| l.events.len()).sum();
     println!("\n=== ARRANGEMENT ({} notes) ===", total);
+    let note_names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
     for lane in arr.all_lanes() {
         if !lane.events.is_empty() {
             println!("  {} ({} notes)", lane.name, lane.events.len());
+            for note in &lane.events {
+                let midi = note.midi_note.unwrap_or(lane.midi_note);
+                let name = note_names[(midi % 12) as usize];
+                let octave = (midi / 12) as i8 - 1;
+                println!("      t={:.0}ms  vel={}  note={}{} (MIDI {})",
+                    note.timestamp_ms, note.velocity, name, octave, midi);
+            }
         }
     }
     println!("\nDone.");

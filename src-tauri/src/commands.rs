@@ -670,6 +670,7 @@ pub fn quantize_events_command(input: QuantizeEventsInput) -> CommandResult<Vec<
 pub struct ArrangeEventsInput {
     pub events: Vec<QuantizedEvent>,
     pub template: String,
+    pub theme_name: String,
     pub bpm: f64,
     pub time_signature: String,
     pub division: String,
@@ -684,6 +685,15 @@ pub struct ArrangeEventsInput {
 pub fn arrange_events_command(input: ArrangeEventsInput) -> CommandResult<Arrangement> {
     // Parse template
     let template = ArrangementTemplate::from_string(&input.template);
+
+    // Get theme by name
+    let theme = match crate::themes::get_theme(&input.theme_name) {
+        Some(t) => t,
+        None => {
+            // Fallback to first available theme
+            crate::themes::get_theme("BLADE RUNNER").expect("Theme must exist")
+        }
+    };
 
     // Parse time signature
     let time_signature = match input.time_signature.as_str() {
@@ -719,8 +729,14 @@ pub fn arrange_events_command(input: ArrangeEventsInput) -> CommandResult<Arrang
         input.bar_count,
     );
 
-    // Arrange events
-    let arrangement = arranger::arrange_events(&input.events, &template, &grid, input.b_emphasis);
+    // Arrange events with harmonic context
+    let arrangement = arranger::arrange_events(
+        &input.events,
+        &template,
+        &grid,
+        &theme,
+        input.b_emphasis
+    );
 
     Ok(arrangement)
 }

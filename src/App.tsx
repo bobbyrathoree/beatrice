@@ -285,12 +285,12 @@ function App() {
       });
 
       setProcessingProgress(0.8);
-
       // Step 4: Arrange events
       const arrangement = await invoke<Arrangement>("arrange_events_command", {
         input: {
           events: quantizedResult,
           template: mapThemeToTemplate(selectedTheme),
+          theme_name: selectedTheme?.name || "BLADE RUNNER",
           bpm: tempoResult.bpm,
           time_signature: gridSettings.time_signature,
           division: gridSettings.division,
@@ -399,6 +399,7 @@ function App() {
         input: {
           events: quantizedResult,
           template: mapThemeToTemplate(selectedTheme),
+          theme_name: selectedTheme?.name || "BLADE RUNNER",
           bpm: currentBpm,
           time_signature: gridSettings.time_signature,
           division: gridSettings.division,
@@ -408,7 +409,6 @@ function App() {
           b_emphasis: pipelineParams.bEmphasis,
         },
       });
-
       setPipelineResult((prev) => {
         if (!prev) return prev;
         return {
@@ -623,7 +623,7 @@ function App() {
 
   // Convert pipeline events to EventDecision format for explainability
   const eventDecisions = useMemo<EventDecision[]>(() => {
-    if (!pipelineResult?.events?.length) return [];
+    if (!pipelineResult?.events?.length || !pipelineResult?.arrangement) return [];
 
     return pipelineResult.events.map((event: EventData, index: number) => {
       const quantizedEvent = pipelineResult.quantized_events?.[index];
@@ -642,15 +642,42 @@ function App() {
       const confidence = event.confidence ?? 0.85;
       const className = event.class || 'BilabialPlosive';
 
+      // Find notes triggered by this event in the arrangement
+      const assigned_notes: AssignedNote[] = [];
+      const arrangement = pipelineResult.arrangement;
+
+      // Helper to check lanes
+      const checkLane = (lane: any) => {
+        if (!lane || !Array.isArray(lane.events)) return;
+        for (const note of lane.events) {
+          if (note.source_event_id === event.id) {
+            assigned_notes.push({
+              lane_name: lane.name,
+              midi_note: note.midi_note ?? lane.midi_note,
+              velocity: note.velocity,
+              duration_ms: note.duration_ms,
+            });
+          }
+        }
+      };
+
+      if (Array.isArray(arrangement.drum_lanes)) {
+        arrangement.drum_lanes.forEach(checkLane);
+      }
+      checkLane(arrangement.bass_lane);
+      checkLane(arrangement.pad_lane);
+      checkLane(arrangement.arp_lane);
+
       return {
         event_id: event.id || `event_${index}`,
-        original_timestamp_ms: originalTimestamp,
+        timestamp_ms: originalTimestamp,
+        duration_ms: event.duration_ms || 50,
         quantized_timestamp_ms: quantizedTimestamp,
         snap_delta_ms: quantizedTimestamp - originalTimestamp,
         class: className as EventDecision['class'],
         confidence,
-        mapped_to: ['SYNTH'],
-        reasoning: `Classified as ${className} based on audio features. Confidence: ${(confidence * 100).toFixed(1)}%.`,
+        assigned_notes,
+        reasoning: `Classified as ${className} based on audio features. Confidence: ${(confidence * 100).toFixed(1)}%. Triggered ${assigned_notes.length} instrument(s).`,
         features,
       };
     });

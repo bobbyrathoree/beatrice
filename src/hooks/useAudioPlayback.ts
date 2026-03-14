@@ -18,6 +18,7 @@ interface ArrangedNote {
   timestamp_ms: number;
   duration_ms: number;
   velocity: number; // 0-127 MIDI velocity
+  midi_note?: number; // Optional per-note MIDI override
   source_event_id: string | null;
 }
 
@@ -590,7 +591,7 @@ export function useAudioPlayback() {
 
     for (const lane of lanes) {
       for (const note of lane.events) {
-        scheduleNote(ctx, lane.name, lane.midi_note, note, startTime);
+        scheduleNote(ctx, lane.name, note.midi_note ?? lane.midi_note, note, startTime);
       }
     }
 

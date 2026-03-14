@@ -66,6 +66,9 @@ pub struct ArrangedNote {
     /// MIDI velocity (0-127)
     pub velocity: u8,
 
+    /// MIDI note override (if None, use lane's default)
+    pub midi_note: Option<u8>,
+
     /// Link back to original event (if applicable)
     pub source_event_id: Option<Uuid>,
 }
@@ -76,12 +79,14 @@ impl ArrangedNote {
         timestamp_ms: f64,
         duration_ms: f64,
         velocity: u8,
+        midi_note: Option<u8>,
         source_event_id: Option<Uuid>,
     ) -> Self {
         ArrangedNote {
             timestamp_ms,
             duration_ms,
             velocity: velocity.clamp(1, 127),
+            midi_note,
             source_event_id,
         }
     }
@@ -92,6 +97,7 @@ impl ArrangedNote {
             event.quantized_timestamp_ms,
             event.original_event.duration_ms.min(100.0), // Cap at 100ms for drum hits
             velocity,
+            None, // Use lane's default MIDI note
             Some(event.original_event.id),
         )
     }
@@ -154,22 +160,20 @@ impl Arrangement {
     }
 }
 
-/// Arrange events according to template rules
+use crate::themes::{Theme, scale_notes, chord_notes, bass_notes, arp_notes};
+
+/// Arrange events according to template rules and harmonic context
 ///
 /// This function maps detected events to instrument lanes based on:
 /// - Event classification (BilabialPlosive -> KICK, etc.)
 /// - Template rules (which positions get which instruments)
+/// - Theme's harmonic context (Scale, Chord Progression)
 /// - B-emphasis parameter (controls synth note triggering)
-///
-/// # Arguments
-/// * `events` - Quantized events from groove engine
-/// * `template` - Arrangement template defining the style
-/// * `grid` - Musical grid for timing calculations
-/// * `b_emphasis` - How strongly B sounds trigger synth notes [0.0, 1.0]
 pub fn arrange_events(
     events: &[QuantizedEvent],
     template: &ArrangementTemplate,
     grid: &Grid,
+    theme: &Theme,
     b_emphasis: f32,
 ) -> Arrangement {
     let rules = template.rules();
@@ -177,18 +181,34 @@ pub fn arrange_events(
 
     let mut arrangement = Arrangement::new(*template, total_duration, grid.bar_count);
 
-    // Create drum lanes
+    // Create drum lanes (Standard GM MIDI notes)
     let mut kick_lane = DrumLane::new("DRUMS_KICK", MIDI_KICK);
     let mut snare_lane = DrumLane::new("DRUMS_SNARE", MIDI_SNARE);
     let mut hihat_lane = DrumLane::new("DRUMS_HIHAT", MIDI_CLOSED_HIHAT);
-    let mut bass_lane = DrumLane::new("BASS", 36); // Bass synth (will use different MIDI note range)
-    let mut pad_lane = DrumLane::new("PADS", 48);  // Pad synth
+
+    // Instrument lanes - notes will be resolved per-event from theme
+    let mut bass_lane = DrumLane::new("BASS", 36); // Default C2
+    let mut pad_lane = DrumLane::new("PADS", 48);  // Default C3
+    let mut arp_lane = DrumLane::new("ARP", 60);   // Default C4
+
+    // Pre-calculate scale notes for the theme
+    let scale = scale_notes(theme.root_note, &theme.scale_family);
+
+    // Track arpeggio position for "Rhythmic Puppeteering"
+    let mut arp_counter = 0;
 
     // Process each event
     for event in events {
+        let timestamp = event.quantized_timestamp_ms;
+
+        // Resolve harmonic context for this specific moment
+        let chord_type = theme.get_chord_at_time(timestamp, grid);
+        let current_chord = chord_notes(theme.root_note, &chord_type, &scale);
+        let chord_root = current_chord[0];
+
         match event.original_event.class {
             EventClass::BilabialPlosive => {
-                // B/P sounds -> Kick + potentially bass synth
+                // B/P sounds -> Kick + Bass Synth
                 let velocity = calculate_velocity(
                     event.original_event.confidence,
                     event.original_event.features.peak_amplitude,
@@ -202,17 +222,24 @@ pub fn arrange_events(
                 // Add bass synth note if b_emphasis is high enough
                 if b_emphasis > 0.3 {
                     let bass_velocity = (velocity as f32 * b_emphasis) as u8;
+
+                    // Resolve bass note based on theme pattern and beat position
+                    let pattern_notes = bass_notes(chord_root, &theme.bass_pattern);
+                    let note_index = (event.grid_position.beat as usize + event.grid_position.subdivision as usize) % pattern_notes.len();
+                    let bass_note = pattern_notes[note_index] - 12; // Shift down an octave for bass
+
                     bass_lane.add_note(ArrangedNote::new(
-                        event.quantized_timestamp_ms,
-                        200.0, // Longer duration for bass
+                        timestamp,
+                        200.0, // Standard bass duration
                         bass_velocity,
+                        Some(bass_note),
                         Some(event.original_event.id),
                     ));
                 }
             }
 
             EventClass::Click => {
-                // T/K sounds -> Snare/Clap
+                // T/K sounds -> Snare
                 let velocity = calculate_velocity(
                     event.original_event.confidence,
                     event.original_event.features.peak_amplitude,
@@ -224,31 +251,57 @@ pub fn arrange_events(
             }
 
             EventClass::HihatNoise => {
-                // S/TS sounds -> Hi-hats
+                // S/TS sounds -> Hi-hats or Arpeggio triggers
                 let velocity = calculate_velocity(
                     event.original_event.confidence,
                     event.original_event.features.peak_amplitude,
                 );
 
-                // Hi-hats follow density pattern
+                // 1. Classic hi-hat placement
                 if should_place_hihat(&event.grid_position, &rules.hihat_density) {
                     hihat_lane.add_note(ArrangedNote::from_quantized_event(event, velocity));
+                }
+
+                // 2. Rhythmic Puppeteering (Arpeggios)
+                // If template is ArpDrive, hi-hats advance the arpeggiator
+                if *template == ArrangementTemplate::ArpDrive {
+                    let arp_sequence = arp_notes(&current_chord, &theme.arp_pattern, theme.arp_octave_range);
+                    if !arp_sequence.is_empty() {
+                        let note_index = arp_counter % arp_sequence.len();
+                        let arp_note = arp_sequence[note_index];
+                        
+                        arp_lane.add_note(ArrangedNote::new(
+                            timestamp,
+                            150.0, // Short, plucky arpeggio duration
+                            (velocity as f32 * 0.9) as u8,
+                            Some(arp_note),
+                            Some(event.original_event.id),
+                        ));
+                        
+                        arp_counter += 1;
+                    }
                 }
             }
 
             EventClass::HumVoiced => {
-                // Voiced sounds -> Pads
+                // Voiced sounds -> Pads (Layered triad)
                 let velocity = calculate_velocity(
                     event.original_event.confidence,
                     event.original_event.features.peak_amplitude,
                 );
 
-                pad_lane.add_note(ArrangedNote::new(
-                    event.quantized_timestamp_ms,
-                    event.original_event.duration_ms.max(300.0), // Sustained pad notes
-                    velocity,
-                    Some(event.original_event.id),
-                ));
+                let duration = event.original_event.duration_ms.max(400.0);
+
+                // Add each note of the chord to the pad lane
+                for &note in &current_chord {
+                    pad_lane.add_note(ArrangedNote::new(
+                        timestamp,
+                        duration,
+                        (velocity as f32 * 0.8) as u8, // Slightly softer pads
+                        Some(note),
+                        Some(event.original_event.id),
+                    ));
+                }
             }
         }
     }
@@ -259,6 +312,7 @@ pub fn arrange_events(
     hihat_lane.sort_by_time();
     bass_lane.sort_by_time();
     pad_lane.sort_by_time();
+    arp_lane.sort_by_time();
 
     // Add lanes to arrangement
     arrangement.add_drum_lane(kick_lane);
@@ -266,6 +320,7 @@ pub fn arrange_events(
     arrangement.add_drum_lane(hihat_lane);
     arrangement.bass_lane = Some(bass_lane);
     arrangement.pad_lane = Some(pad_lane);
+    arrangement.arp_lane = Some(arp_lane);
 
     arrangement
 }
@@ -364,7 +419,7 @@ mod tests {
         assert_eq!(lane.midi_note, MIDI_KICK);
         assert_eq!(lane.events.len(), 0);
 
-        let note = ArrangedNote::new(100.0, 50.0, 100, None);
+        let note = ArrangedNote::new(100.0, 50.0, 100, None, None);
         lane.add_note(note);
         assert_eq!(lane.events.len(), 1);
     }
@@ -433,6 +488,7 @@ mod tests {
     fn test_arrange_events_basic() {
         let grid = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Quarter, 1);
         let template = ArrangementTemplate::SynthwaveStraight;
+        let theme = crate::themes::get_theme("BLADE RUNNER").unwrap();
 
         let events = vec![
             create_quantized_event(
@@ -445,7 +501,7 @@ mod tests {
             ),
         ];
 
-        let arrangement = arrange_events(&events, &template, &grid, 0.5);
+        let arrangement = arrange_events(&events, &template, &grid, &theme, 0.5);
 
         // Should have drum lanes
         assert!(arrangement.drum_lanes.len() >= 3);
@@ -463,6 +519,7 @@ mod tests {
     fn test_b_emphasis_triggers_bass() {
         let grid = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Quarter, 1);
         let template = ArrangementTemplate::SynthwaveStraight;
+        let theme = crate::themes::get_theme("BLADE RUNNER").unwrap();
 
         let events = vec![
             create_quantized_event(
@@ -472,13 +529,13 @@ mod tests {
         ];
 
         // High b_emphasis should trigger bass
-        let arrangement_high = arrange_events(&events, &template, &grid, 0.8);
+        let arrangement_high = arrange_events(&events, &template, &grid, &theme, 0.8);
         assert!(arrangement_high.bass_lane.is_some());
-        assert!(arrangement_high.bass_lane.unwrap().events.len() > 0);
+        assert!(arrangement_high.bass_lane.as_ref().unwrap().events.len() > 0);
 
         // Low b_emphasis should not trigger bass
-        let arrangement_low = arrange_events(&events, &template, &grid, 0.2);
+        let arrangement_low = arrange_events(&events, &template, &grid, &theme, 0.2);
         assert!(arrangement_low.bass_lane.is_some());
-        assert_eq!(arrangement_low.bass_lane.unwrap().events.len(), 0);
+        assert_eq!(arrangement_low.bass_lane.as_ref().unwrap().events.len(), 0);
     }
 }

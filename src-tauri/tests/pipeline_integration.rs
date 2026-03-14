@@ -283,7 +283,8 @@ fn test_pattern_full_pipeline() {
 
     // Step 5: Arrange
     let template = beatrice_lib::arranger::ArrangementTemplate::SynthwaveStraight;
-    let arrangement = beatrice_lib::arranger::arrange_events(&quantized, &template, &grid, 0.6);
+    let theme = beatrice_lib::themes::get_theme("BLADE RUNNER").expect("Default theme not found");
+    let arrangement = beatrice_lib::arranger::arrange_events(&quantized, &template, &grid, &theme, 0.6);
 
     let total_notes: usize = arrangement.all_lanes().iter().map(|l| l.events.len()).sum();
     println!("Pipeline: arrangement has {} lanes, {} total notes",

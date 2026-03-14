@@ -112,6 +112,32 @@ impl Theme {
             scale_family: self.scale_family,
         }
     }
+
+    /// Get the active chord at a specific timestamp
+    pub fn get_chord_at_time(&self, timestamp_ms: f64, grid: &crate::groove::grid::Grid) -> ChordType {
+        let chords = &self.chord_progression.chords;
+        if chords.is_empty() {
+            return ChordType::Im; // Default
+        }
+
+        // Calculate ms per bar
+        let ms_per_beat = 60_000.0 / grid.bpm;
+        let ms_per_bar = ms_per_beat * grid.time_signature.beats_per_bar() as f64;
+
+        // Current bar (0-indexed)
+        let bar = (timestamp_ms / ms_per_bar).floor() as u32;
+
+        // Total bars in one progression cycle
+        let progression_cycle_bars = self.chord_progression.bars_per_chord * chords.len() as u32;
+
+        // Current bar within the cycle
+        let cycle_bar = bar % progression_cycle_bars;
+
+        // Index of the chord
+        let chord_index = (cycle_bar / self.chord_progression.bars_per_chord) as usize;
+
+        chords[chord_index.min(chords.len() - 1)]
+    }
 }
 
 // Helper functions for musical calculations

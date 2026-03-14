@@ -132,7 +132,7 @@ fn create_lane_track<'a>(
             TrackEventKind::Midi {
                 channel: 9.into(), // Channel 10 (0-indexed = 9) is drums
                 message: MidiMessage::NoteOn {
-                    key: lane.midi_note.into(),
+                    key: note.midi_note.unwrap_or(lane.midi_note).into(),
                     vel: note.velocity.into(),
                 },
             },
@@ -144,7 +144,7 @@ fn create_lane_track<'a>(
             TrackEventKind::Midi {
                 channel: 9.into(),
                 message: MidiMessage::NoteOff {
-                    key: lane.midi_note.into(),
+                    key: note.midi_note.unwrap_or(lane.midi_note).into(),
                     vel: 0.into(),
                 },
             },
@@ -303,12 +303,12 @@ mod tests {
 
         // Create a kick lane with one note
         let mut kick_lane = DrumLane::new("KICK", MIDI_KICK);
-        kick_lane.add_note(ArrangedNote::new(0.0, 100.0, 100, None));
+        kick_lane.add_note(ArrangedNote::new(0.0, 100.0, 100, None, None));
         arrangement.add_drum_lane(kick_lane);
 
         // Create a snare lane with one note
         let mut snare_lane = DrumLane::new("SNARE", MIDI_SNARE);
-        snare_lane.add_note(ArrangedNote::new(500.0, 100.0, 90, None));
+        snare_lane.add_note(ArrangedNote::new(500.0, 100.0, 90, None, None));
         arrangement.add_drum_lane(snare_lane);
 
         let options = MidiExportOptions::default();
@@ -392,8 +392,8 @@ mod tests {
         let ticks_per_ms = calculate_ticks_per_ms(120.0, 480);
 
         let mut lane = DrumLane::new("TEST", MIDI_KICK);
-        lane.add_note(ArrangedNote::new(0.0, 100.0, 100, None));
-        lane.add_note(ArrangedNote::new(500.0, 100.0, 100, None));
+        lane.add_note(ArrangedNote::new(0.0, 100.0, 100, None, None));
+        lane.add_note(ArrangedNote::new(500.0, 100.0, 100, None, None));
 
         let options = MidiExportOptions::default();
         let track = create_lane_track(&lane, ticks_per_ms, &options);

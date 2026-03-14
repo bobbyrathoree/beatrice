@@ -1,17 +1,11 @@
 #!/usr/bin/env node
 /**
  * Generate deterministic test WAV files for Beatrice pipeline verification.
- * Each file is designed to trigger a specific EventClass in the heuristic classifier.
- *
- * Expected classifications (based on heuristic.rs thresholds):
- *   test-kick.wav    → BilabialPlosive (low centroid, high low-band, low ZCR)
- *   test-hihat.wav   → HihatNoise      (high centroid, high ZCR, high high-band)
- *   test-snare.wav   → Click           (mid centroid, moderate ZCR, mid-band)
- *   test-hum.wav     → HumVoiced       (mid-low centroid, low ZCR, balanced bands)
- *   test-pattern.wav → Composite: kick @ 0s, hihat @ 0.5s, snare @ 1.0s, kick @ 1.5s
+ * 
+ * Optimized for clean onset detection and sharp transients.
  */
 
-import { writeFileSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -22,30 +16,25 @@ const SAMPLE_RATE = 44100;
 const BIT_DEPTH = 16;
 const NUM_CHANNELS = 1;
 
-// --- WAV file writer ---
+if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
 function writeWav(filename, samples) {
   const numSamples = samples.length;
-  const dataSize = numSamples * 2; // 16-bit = 2 bytes per sample
+  const dataSize = numSamples * 2;
   const fileSize = 44 + dataSize;
   const buf = Buffer.alloc(fileSize);
 
-  // RIFF header
   buf.write('RIFF', 0);
   buf.writeUInt32LE(fileSize - 8, 4);
   buf.write('WAVE', 8);
-
-  // fmt chunk
   buf.write('fmt ', 12);
-  buf.writeUInt32LE(16, 16);            // chunk size
-  buf.writeUInt16LE(1, 20);             // PCM
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
   buf.writeUInt16LE(NUM_CHANNELS, 22);
   buf.writeUInt32LE(SAMPLE_RATE, 24);
-  buf.writeUInt32LE(SAMPLE_RATE * 2, 28); // byte rate
-  buf.writeUInt16LE(2, 32);             // block align
+  buf.writeUInt32LE(SAMPLE_RATE * 2, 28);
+  buf.writeUInt16LE(2, 32);
   buf.writeUInt16LE(BIT_DEPTH, 34);
-
-  // data chunk
   buf.write('data', 36);
   buf.writeUInt32LE(dataSize, 40);
 
@@ -56,285 +45,137 @@ function writeWav(filename, samples) {
 
   const path = join(outDir, filename);
   writeFileSync(path, buf);
-  const durationMs = (numSamples / SAMPLE_RATE * 1000).toFixed(0);
-  console.log(`  ${filename} (${durationMs}ms, ${numSamples} samples, ${fileSize} bytes)`);
   return path;
 }
 
-// --- Signal generators ---
-
-/** Deterministic pseudo-random (seeded LCG) */
 function seededRandom(seed) {
   let s = seed;
   return () => {
     s = (s * 1664525 + 1013904223) & 0xFFFFFFFF;
-    return (s >>> 0) / 0xFFFFFFFF;       // 0..1
+    return (s >>> 0) / 0xFFFFFFFF;
   };
 }
 
-/**
- * test-kick.wav — BilabialPlosive archetype
- * 80Hz sine burst with fast exponential decay.
- * Expected features: centroid ~200Hz, low_band_energy ~0.8, ZCR ~0.05
- */
 function generateKick(durationSec = 0.5) {
   const n = Math.floor(SAMPLE_RATE * durationSec);
   const samples = new Float64Array(n);
   for (let i = 0; i < n; i++) {
     const t = i / SAMPLE_RATE;
-    // Frequency sweep: 150Hz → 60Hz over 50ms, then 60Hz
     const freq = t < 0.05 ? 150 - (90 * t / 0.05) : 60;
     const phase = 2 * Math.PI * freq * t;
-    const envelope = Math.exp(-12 * t);
+    const envelope = Math.exp(-35 * t); // Super sharp decay
     samples[i] = Math.sin(phase) * envelope * 0.9;
   }
   return samples;
 }
 
-/**
- * test-hihat.wav — HihatNoise archetype
- * High-frequency noise burst (bandpass ~6-12kHz range).
- * Expected features: centroid >4000Hz, ZCR >0.4, high_band_energy >0.5
- */
 function generateHihat(durationSec = 0.3) {
   const n = Math.floor(SAMPLE_RATE * durationSec);
   const samples = new Float64Array(n);
   const rand = seededRandom(42);
-
   for (let i = 0; i < n; i++) {
     const t = i / SAMPLE_RATE;
-    const envelope = Math.exp(-25 * t);
-
-    // Generate noise and apply simple high-pass approximation
-    // Sum of high-frequency sinusoids for determinism
+    const envelope = Math.exp(-40 * t);
     let signal = 0;
     for (let f = 6000; f <= 12000; f += 500) {
       signal += Math.sin(2 * Math.PI * f * t + rand() * Math.PI * 2) * 0.15;
     }
-
-    // Add some random-phase noise for realism
     signal += (rand() * 2 - 1) * 0.3;
-
     samples[i] = signal * envelope * 0.7;
   }
   return samples;
 }
 
-/**
- * test-snare.wav — Click archetype
- * Mid-frequency transient with strong body, moderate noise.
- * The Click classifier expects: centroid 1000-2500Hz, ZCR 0.2-0.5, mid_band >0.3
- * Band boundaries: low 0-500Hz, mid 500-4000Hz, high 4000+Hz
- *
- * Strategy: Strong tonal body at 800-1500Hz range, moderate noise, fast decay.
- * Keep energy BELOW 4000Hz so it stays in mid-band, not high-band.
- */
 function generateSnare(durationSec = 0.3) {
   const n = Math.floor(SAMPLE_RATE * durationSec);
   const samples = new Float64Array(n);
   const rand = seededRandom(123);
-
   for (let i = 0; i < n; i++) {
     const t = i / SAMPLE_RATE;
-    const envelope = Math.exp(-18 * t);
-
-    // Strong tonal body: 800Hz + 1200Hz + 1600Hz (mid-band emphasis)
+    const envelope = Math.exp(-45 * t);
     const body = (
       Math.sin(2 * Math.PI * 800 * t) * 0.35 +
       Math.sin(2 * Math.PI * 1200 * t) * 0.25 +
       Math.sin(2 * Math.PI * 1600 * t) * 0.15
-    ) * Math.exp(-25 * t);
-
-    // Noise — narrow band around 1000-2500Hz only, no broadband
+    ) * Math.exp(-50 * t);
     let noise = 0;
     for (let f = 1000; f <= 2500; f += 250) {
       noise += Math.sin(2 * Math.PI * f * t + rand() * Math.PI * 2) * 0.06;
     }
-
     samples[i] = (body + noise * envelope) * 0.8;
   }
   return samples;
 }
 
-/**
- * test-hum.wav — HumVoiced archetype
- * Designed to navigate the heuristic's anti-plosive penalties:
- * - Fundamental at 300Hz + harmonics at 600Hz, 900Hz, 1200Hz (pushes centroid to ~600Hz)
- * - Added breath noise for high_band_energy > 0.25 (avoids concentration penalty)
- * - Slight frequency jitter for ZCR > 0.05 (avoids pure tone penalty)
- * - Sustained (no fast decay) to distinguish from plosive transients
- *
- * Expected features: centroid ~600Hz, ZCR ~0.08, balanced energy distribution
- */
 function generateHum(durationSec = 1.0) {
   const n = Math.floor(SAMPLE_RATE * durationSec);
   const samples = new Float64Array(n);
   const rand = seededRandom(456);
-
   for (let i = 0; i < n; i++) {
     const t = i / SAMPLE_RATE;
-
-    // Slow attack + sustain + gentle release
-    let envelope;
-    if (t < 0.02) envelope = t / 0.02;          // 20ms attack
-    else if (t < durationSec - 0.1) envelope = 1.0;
-    else envelope = (durationSec - t) / 0.1;     // 100ms release
-
-    // Fundamental with slight vibrato (jitter to avoid pure-tone penalty)
-    const vibrato = 1 + 0.005 * Math.sin(2 * Math.PI * 5.5 * t);
-    const f0 = 300 * vibrato;
-
-    // Harmonics: f0, 2*f0, 3*f0, 4*f0 with decreasing amplitude
-    let signal = Math.sin(2 * Math.PI * f0 * t) * 0.4;
-    signal += Math.sin(2 * Math.PI * f0 * 2 * t) * 0.25;
-    signal += Math.sin(2 * Math.PI * f0 * 3 * t) * 0.15;
-    signal += Math.sin(2 * Math.PI * f0 * 4 * t) * 0.08;
-
-    // Breath noise (high-frequency) to balance the spectrum
+    let envelope = t < 0.02 ? t / 0.02 : (t < durationSec - 0.1 ? 1.0 : (durationSec - t) / 0.1);
+    const f0 = 300 * (1 + 0.005 * Math.sin(2 * Math.PI * 5.5 * t));
+    let signal = Math.sin(2 * Math.PI * f0 * t) * 0.4 + 
+                 Math.sin(2 * Math.PI * f0 * 2 * t) * 0.25 +
+                 Math.sin(2 * Math.PI * f0 * 3 * t) * 0.15;
     signal += (rand() * 2 - 1) * 0.06;
-
     samples[i] = signal * envelope * 0.7;
   }
   return samples;
 }
 
-/**
- * test-pattern.wav — Composite pattern at 120 BPM
- * kick @ 0.0s, hihat @ 0.5s, snare @ 1.0s, kick @ 1.5s
- * Total duration: 2.0 seconds (one measure of 4/4 at 120 BPM)
- *
- * Expected: 4 onsets, tempo ~120 BPM, classes [Bilabial, Hihat, Click, Bilabial]
- */
-function generatePattern() {
-  const totalSec = 2.5; // extra tail for decay
+function generate8BarProgression() {
+  const bpm = 120;
+  const beatMs = 60000 / bpm;
+  const totalBars = 8;
+  const totalSec = (beatMs * 4 * totalBars + 500) / 1000;
   const n = Math.floor(SAMPLE_RATE * totalSec);
   const samples = new Float64Array(n);
 
-  const hits = [
-    { time: 0.0,  generator: generateKick,  label: 'kick' },
-    { time: 0.5,  generator: generateHihat, label: 'hihat' },
-    { time: 1.0,  generator: generateSnare, label: 'snare' },
-    { time: 1.5,  generator: generateKick,  label: 'kick2' },
-  ];
+  for (let bar = 0; bar < totalBars; bar++) {
+    const barOffset = bar * beatMs * 4;
+    // Kick on 1, Snare on 2, Kick on 3, Snare on 4
+    addHit(samples, barOffset + 0 * beatMs, generateKick, 0.1);
+    addHit(samples, barOffset + 1 * beatMs, generateSnare, 0.1);
+    addHit(samples, barOffset + 2 * beatMs, generateKick, 0.1);
+    addHit(samples, barOffset + 3 * beatMs, generateSnare, 0.1);
 
-  for (const hit of hits) {
-    const hitSamples = hit.generator(0.4);
-    const startIdx = Math.floor(hit.time * SAMPLE_RATE);
-    for (let i = 0; i < hitSamples.length && (startIdx + i) < n; i++) {
-      samples[startIdx + i] += hitSamples[i];
-    }
-  }
-
-  // Normalize to prevent clipping
-  let peak = 0;
-  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(samples[i]));
-  if (peak > 0.95) {
-    const scale = 0.95 / peak;
-    for (let i = 0; i < n; i++) samples[i] *= scale;
-  }
-
-  return samples;
-}
-
-// --- Main ---
-
-import { mkdirSync, existsSync } from 'fs';
-if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
-
-console.log('Generating deterministic test audio files...\n');
-console.log('Expected classifications:');
-console.log('  test-kick.wav    → BilabialPlosive');
-console.log('  test-hihat.wav   → HihatNoise');
-console.log('  test-snare.wav   → Click');
-console.log('  test-hum.wav     → HumVoiced');
-console.log('  test-pattern.wav → [BilabialPlosive, HihatNoise, Click, BilabialPlosive] @ ~120 BPM\n');
-
-writeWav('test-kick.wav', generateKick(0.5));
-writeWav('test-hihat.wav', generateHihat(0.3));
-writeWav('test-snare.wav', generateSnare(0.3));
-writeWav('test-hum.wav', generateHum(1.0));
-writeWav('test-pattern.wav', generatePattern());
-
-console.log('\nAll files written to test-audio/');
-
-/**
- * test-beatbox-realistic.wav — Realistic beatbox simulation
- * "boots and cats" pattern with:
- * - Timing jitter (±15ms from grid)
- * - Amplitude variation (80-100%)
- * - Background breath noise
- * - Two measures at ~110 BPM
- *
- * Pattern per measure (4/4 at 110 BPM, beat = 545ms):
- *   Beat 1: Kick (B)
- *   Beat 1+: Hihat (ts)
- *   Beat 2: Snare (k)
- *   Beat 2+: Hihat (ts)
- *   Beat 3: Kick (B)
- *   Beat 3+: Hihat (ts)
- *   Beat 4: Snare (k)
- *   Beat 4+: Hihat (ts)
- *
- * Expected: 16 events, tempo ~110 BPM, alternating kick/hihat/snare/hihat
- */
-function generateRealisticBeatbox() {
-  const bpm = 110;
-  const beatMs = 60000 / bpm; // ~545ms
-  const halfBeatMs = beatMs / 2;
-  const totalSec = (beatMs * 8 + 500) / 1000; // 2 measures + tail
-  const n = Math.floor(SAMPLE_RATE * totalSec);
-  const samples = new Float64Array(n);
-  const rand = seededRandom(789);
-
-  // Background breath noise (very low level)
-  for (let i = 0; i < n; i++) {
-    samples[i] = (rand() * 2 - 1) * 0.005;
-  }
-
-  const hits = [];
-
-  for (let measure = 0; measure < 2; measure++) {
-    const measureOffset = measure * beatMs * 4;
-
+    // Hihats on all offbeats (8ths)
     for (let beat = 0; beat < 4; beat++) {
-      const beatOffset = measureOffset + beat * beatMs;
-      const jitter = (rand() - 0.5) * 30; // ±15ms
-      const ampScale = 0.8 + rand() * 0.2; // 80-100%
+      addHit(samples, barOffset + beat * beatMs + beatMs / 2, generateHihat, 0.05);
+    }
 
-      // Downbeat: kick or snare
-      if (beat === 0 || beat === 2) {
-        hits.push({ time: (beatOffset + jitter) / 1000, gen: generateKick, amp: ampScale, label: 'kick' });
-      } else {
-        hits.push({ time: (beatOffset + jitter) / 1000, gen: generateSnare, amp: ampScale, label: 'snare' });
-      }
-
-      // Upbeat: hihat
-      const upbeatJitter = (rand() - 0.5) * 20; // ±10ms (tighter)
-      const hihatAmp = 0.5 + rand() * 0.3; // quieter
-      hits.push({ time: (beatOffset + halfBeatMs + upbeatJitter) / 1000, gen: generateHihat, amp: hihatAmp, label: 'hihat' });
+    // Hum at start of every 2-bar cycle
+    if (bar % 2 === 0) {
+      addHit(samples, barOffset, generateHum, 1.0);
     }
   }
 
-  // Add the hits to the sample buffer
-  for (const hit of hits) {
-    const hitSamples = hit.gen(0.3);
-    const startIdx = Math.max(0, Math.floor(hit.time * SAMPLE_RATE));
-    for (let i = 0; i < hitSamples.length && (startIdx + i) < n; i++) {
-      samples[startIdx + i] += hitSamples[i] * hit.amp;
-    }
-  }
-
-  // Normalize
-  let peak = 0;
-  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(samples[i]));
-  if (peak > 0.95) {
-    const scale = 0.95 / peak;
-    for (let i = 0; i < n; i++) samples[i] *= scale;
-  }
-
+  normalize(samples);
   return samples;
 }
 
-// Generate the realistic beatbox file
-writeWav('test-beatbox-realistic.wav', generateRealisticBeatbox());
-console.log('\nRealistic beatbox test file generated.');
+function addHit(buffer, timeMs, gen, dur) {
+  const hitSamples = gen(dur);
+  const startIdx = Math.floor(timeMs * SAMPLE_RATE / 1000);
+  for (let i = 0; i < hitSamples.length && (startIdx + i) < buffer.length; i++) {
+    buffer[startIdx + i] += hitSamples[i];
+  }
+}
+
+function normalize(samples) {
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) peak = Math.max(peak, Math.abs(samples[i]));
+  if (peak > 0.9) {
+    const scale = 0.9 / peak;
+    for (let i = 0; i < samples.length; i++) samples[i] *= scale;
+  }
+}
+
+console.log('Generating tightened test audio...');
+writeWav('test-kick.wav', generateKick(0.2));
+writeWav('test-hihat.wav', generateHihat(0.1));
+writeWav('test-snare.wav', generateSnare(0.1));
+writeWav('test-hum.wav', generateHum(1.0));
+writeWav('test-8bar-progression.wav', generate8BarProgression());
+console.log('Done.');

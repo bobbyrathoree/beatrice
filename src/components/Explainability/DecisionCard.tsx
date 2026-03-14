@@ -232,39 +232,56 @@ export function DecisionCard({ event, onClose }: DecisionCardProps) {
               </div>
             </section>
 
-            {/* Mapping Section */}
-            <section>
+            {/* Arrangement Mapping */}
+            <div style={{ flex: 1 }}>
               <h4 style={{
                 margin: '0 0 12px 0',
-                fontSize: '16px',
+                fontSize: '12px',
                 fontWeight: 'bold',
                 textTransform: 'uppercase',
                 color: '#666',
               }}>
-                Mapped To
+                Assigned Instruments
               </h4>
               <div style={{
                 display: 'flex',
                 gap: '8px',
                 flexWrap: 'wrap',
               }}>
-                {event.mapped_to.map((instrument) => (
-                  <div
-                    key={instrument}
-                    style={{
-                      border: '2px solid #000',
-                      borderRadius: '4px',
-                      padding: '8px 16px',
-                      backgroundColor: '#F0F0F0',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                    }}
-                  >
-                    {instrument}
+                {event.assigned_notes.map((note, i) => {
+                  // MIDI to note name helper
+                  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+                  const noteName = noteNames[note.midi_note % 12];
+                  const octave = Math.floor(note.midi_note / 12) - 1;
+                  const isDrum = note.lane_name.toUpperCase().includes('DRUM');
+
+                  return (
+                    <div
+                      key={`${note.lane_name}_${i}`}
+                      style={{
+                        border: '2px solid #000',
+                        borderRadius: '4px',
+                        padding: '8px 16px',
+                        backgroundColor: '#F0F0F0',
+                        fontWeight: 'bold',
+                        fontSize: '14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '2px',
+                      }}
+                    >
+                      <div style={{ fontSize: '12px', color: '#666' }}>{note.lane_name}</div>
+                      <div>{!isDrum ? `${noteName}${octave}` : `MIDI ${note.midi_note}`}</div>
+                    </div>
+                  );
+                })}
+                {event.assigned_notes.length === 0 && (
+                  <div style={{ fontSize: '14px', color: '#666', fontStyle: 'italic' }}>
+                    None (Triggered by none)
                   </div>
-                ))}
+                )}
               </div>
-            </section>
+            </div>
 
             {/* Reasoning Section */}
             <section>

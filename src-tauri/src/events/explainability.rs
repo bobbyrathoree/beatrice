@@ -98,7 +98,7 @@ impl EventDecision {
                         if source_id == event.id {
                             notes.push(AssignedNote {
                                 lane_name: lane.name.clone(),
-                                midi_note: lane.midi_note,
+                                midi_note: note.midi_note.unwrap_or(lane.midi_note),
                                 velocity: note.velocity,
                                 duration_ms: note.duration_ms,
                             });
