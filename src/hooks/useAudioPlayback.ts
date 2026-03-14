@@ -54,27 +54,72 @@ function createNoiseBuffer(ctx: AudioContext, durationSec: number): AudioBuffer 
   return buffer;
 }
 
-// ---- Master bus (sidechain ducking target) ----
+// ---- Master FX Chain (Reverb and Delay) ----
 
 let masterGain: GainNode | null = null;
-let sidechainDuckTimes: number[] = [];
+let reverbNode: ConvolverNode | null = null;
+let delayNode: DelayNode | null = null;
+let delayFeedback: GainNode | null = null;
+
+/** Create a synthesized impulse response for the reverb */
+function createImpulseResponse(ctx: AudioContext, duration: number, decay: number): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const length = sampleRate * duration;
+  const buffer = ctx.createBuffer(2, length, sampleRate);
+  
+  for (let channel = 0; channel < 2; channel++) {
+    const data = buffer.getChannelData(channel);
+    for (let i = 0; i < length; i++) {
+      const t = i / sampleRate;
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t / duration, decay);
+    }
+  }
+  return buffer;
+}
 
 function getMasterBus(ctx: AudioContext): GainNode {
   if (!masterGain || masterGain.context !== ctx) {
+    // 1. Master Gain (Sidechain target)
     masterGain = ctx.createGain();
     masterGain.gain.setValueAtTime(0.85, ctx.currentTime);
+
+    // 2. Stereo Delay
+    delayNode = ctx.createDelay(1.0);
+    delayNode.delayTime.setValueAtTime(0.375, ctx.currentTime); // 1/8th dot approx at 120bpm
+    
+    delayFeedback = ctx.createGain();
+    delayFeedback.gain.setValueAtTime(0.3, ctx.currentTime);
+    
+    delayNode.connect(delayFeedback);
+    delayFeedback.connect(delayNode);
+
+    // 3. Cinematic Reverb
+    reverbNode = ctx.createConvolver();
+    reverbNode.buffer = createImpulseResponse(ctx, 3.0, 2.5);
+
+    const reverbGain = ctx.createGain();
+    reverbGain.gain.setValueAtTime(0.2, ctx.currentTime);
+
+    // 4. Routing: Master -> Destination (Dry)
+    //           Master -> Delay -> Destination (Wet)
+    //           Master -> Reverb -> Destination (Wet)
     masterGain.connect(ctx.destination);
-    sidechainDuckTimes = [];
+    
+    masterGain.connect(delayNode);
+    delayNode.connect(ctx.destination);
+    
+    masterGain.connect(reverbNode);
+    reverbNode.connect(reverbGain);
+    reverbGain.connect(ctx.destination);
   }
   return masterGain;
 }
 
 function scheduleSidechainDuck(ctx: AudioContext, time: number) {
   const master = getMasterBus(ctx);
-  // Quick duck on kick hits — the signature "pumping" feel
-  master.gain.setValueAtTime(0.85, time);
-  master.gain.linearRampToValueAtTime(0.4, time + 0.005);  // 5ms attack
-  master.gain.linearRampToValueAtTime(0.85, time + 0.12);  // 120ms release
+  // Pumping effect — ducks everything *before* it hits reverb
+  master.gain.setTargetAtTime(0.3, time, 0.005);
+  master.gain.setTargetAtTime(0.85, time + 0.08, 0.05);
 }
 
 // ---- Individual instrument schedulers ----
