@@ -149,13 +149,13 @@ export function DecisionCard({ event, onClose }: DecisionCardProps) {
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ fontWeight: 'bold' }}>Original:</span>
                   <span style={{ fontFamily: 'monospace' }}>
-                    {formatTime(event.original_timestamp_ms)}
+                    {formatTime(event.timestamp_ms)}
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ fontWeight: 'bold' }}>Quantized:</span>
                   <span style={{ fontFamily: 'monospace' }}>
-                    {formatTime(event.quantized_timestamp_ms)}
+                    {event.quantized_timestamp_ms !== undefined ? formatTime(event.quantized_timestamp_ms) : 'N/A'}
                   </span>
                 </div>
                 <div style={{
@@ -168,9 +168,9 @@ export function DecisionCard({ event, onClose }: DecisionCardProps) {
                   <span style={{
                     fontFamily: 'monospace',
                     fontWeight: 'bold',
-                    color: event.snap_delta_ms === 0 ? '#666' : color,
+                    color: !event.snap_delta_ms ? '#666' : color,
                   }}>
-                    {formatDelta(event.snap_delta_ms)}
+                    {event.snap_delta_ms !== undefined ? formatDelta(event.snap_delta_ms) : '0.0ms'}
                   </span>
                 </div>
               </div>
@@ -266,12 +266,22 @@ export function DecisionCard({ event, onClose }: DecisionCardProps) {
                         fontWeight: 'bold',
                         fontSize: '14px',
                         display: 'flex',
-                        flexDirection: 'column',
-                        gap: '2px',
+                        alignItems: 'center',
+                        gap: '6px',
                       }}
                     >
-                      <div style={{ fontSize: '12px', color: '#666' }}>{note.lane_name}</div>
-                      <div>{!isDrum ? `${noteName}${octave}` : `MIDI ${note.midi_note}`}</div>
+                      <span>{note.lane_name}</span>
+                      {!isDrum && (
+                        <span style={{ 
+                          color: '#666',
+                          fontSize: '13px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}>
+                          <span style={{ fontSize: '10px' }}>→</span> {noteName}{octave}
+                        </span>
+                      )}
                     </div>
                   );
                 })}
