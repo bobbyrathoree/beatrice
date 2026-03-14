@@ -192,7 +192,7 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
               onClick={() => !disabled && selectTheme(theme.name)}
               disabled={disabled}
               style={{
-                border: '4px solid #000',
+                border: isSelected ? `6px solid ${themeColor}` : '4px solid #000',
                 borderRadius: '8px',
                 padding: '20px',
                 backgroundColor: isSelected ? themeColor : '#FFFFFF',
@@ -202,10 +202,11 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '12px',
-                boxShadow: isSelected ? '4px 4px 0 0 #000' : '2px 2px 0 0 #000',
+                boxShadow: isSelected ? `8px 8px 0 0 #000` : '4px 4px 0 0 #000',
                 opacity: disabled ? 0.5 : 1,
-                transition: 'background-color 0.2s, color 0.2s',
+                transition: 'all 0.2s ease-out',
                 position: 'relative',
+                transform: isSelected ? 'scale(1.02)' : 'scale(1)',
               }}
             >
               {/* Active indicator */}
@@ -215,18 +216,19 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
                   animate={{ scale: 1 }}
                   style={{
                     position: 'absolute',
-                    top: '12px',
-                    right: '12px',
-                    width: '24px',
-                    height: '24px',
+                    top: '-12px',
+                    right: '-12px',
+                    width: '32px',
+                    height: '32px',
                     borderRadius: '50%',
-                    backgroundColor: '#FFFFFF',
-                    border: '3px solid #000',
+                    backgroundColor: '#000',
+                    color: '#FFF',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '16px',
-                    fontWeight: 'bold',
+                    fontSize: '18px',
+                    border: '3px solid #FFF',
+                    zIndex: 10,
                   }}
                 >
                   ✓

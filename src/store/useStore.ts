@@ -70,9 +70,9 @@ interface BeatriceState {
 }
 
 const defaultPipelineParams: PipelineParams = {
-  theme: 'trap',
-  bpm: 140,
-  swing: 0.5,
+  theme: 'BLADE RUNNER',
+  bpm: 120,
+  swing: 0.0,
   quantize: 0.8,
   bEmphasis: 0.6,
 };

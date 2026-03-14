@@ -11,6 +11,7 @@ import { DemoButton } from "./components/DemoButton";
 import { BEmphasisSlider } from "./components/BEmphasisSlider";
 import { ExportControls } from "./components/ExportControls";
 import { Timeline } from "./components/Explainability/Timeline";
+import { ArrangementLanes } from "./components/Explainability/ArrangementLanes";
 import { DecisionCard } from "./components/Explainability/DecisionCard";
 import { Waveform } from "./components/Waveform";
 import { BeatMarkers } from "./components/BeatMarkers";
@@ -906,6 +907,22 @@ function App() {
                     events={eventDecisions}
                     onEventClick={handleEventClick}
                     maxDuration={pipelineResult.arrangement?.total_duration_ms || undefined}
+                  />
+                </motion.div>
+              )}
+
+              {/* Arrangement Visualizer */}
+              {pipelineResult?.arrangement && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.18 }}
+                >
+                  <ArrangementLanes
+                    arrangement={pipelineResult.arrangement}
+                    currentTime={currentTime}
+                    isPlaying={isPlaying}
+                    themeName={selectedTheme?.name}
                   />
                 </motion.div>
               )}
