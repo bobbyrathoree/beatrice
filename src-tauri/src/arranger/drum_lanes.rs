@@ -538,4 +538,42 @@ mod tests {
         assert!(arrangement_low.bass_lane.is_some());
         assert_eq!(arrangement_low.bass_lane.as_ref().unwrap().events.len(), 0);
     }
+
+    #[test]
+    fn test_arp_drive_rhythmic_puppeteering() {
+        let grid = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Sixteenth, 1);
+        let template = ArrangementTemplate::ArpDrive;
+        let theme = crate::themes::get_theme("STRANGER THINGS").unwrap();
+
+        // 3 hi-hat events in a row
+        let events = vec![
+            create_quantized_event(
+                create_test_event(0.0, EventClass::HihatNoise),
+                GridPosition { bar: 0, beat: 0, subdivision: 0 },
+            ),
+            create_quantized_event(
+                create_test_event(125.0, EventClass::HihatNoise),
+                GridPosition { bar: 0, beat: 0, subdivision: 1 },
+            ),
+            create_quantized_event(
+                create_test_event(250.0, EventClass::HihatNoise),
+                GridPosition { bar: 0, beat: 0, subdivision: 2 },
+            ),
+        ];
+
+        let arrangement = arrange_events(&events, &template, &grid, &theme, 0.5);
+
+        // Arp lane should exist and have 3 notes
+        assert!(arrangement.arp_lane.is_some());
+        let arp_events = &arrangement.arp_lane.as_ref().unwrap().events;
+        assert_eq!(arp_events.len(), 3);
+
+        // They should have different MIDI notes (walking up the arpeggio)
+        let note1 = arp_events[0].midi_note.unwrap();
+        let note2 = arp_events[1].midi_note.unwrap();
+        let note3 = arp_events[2].midi_note.unwrap();
+
+        assert_ne!(note1, note2);
+        assert_ne!(note2, note3);
+    }
 }
