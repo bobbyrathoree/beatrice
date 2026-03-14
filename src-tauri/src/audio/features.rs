@@ -267,9 +267,6 @@ pub fn detect_onsets(audio: &AudioData, config: &OnsetConfig) -> Vec<Onset> {
     }
 
     // Check for energy at the very start of the audio.
-    // The spectral flux detector misses onsets at t=0 because flux requires
-    // a previous frame to compute the difference. If the first few ms have
-    // significant energy, inject an onset at t=0.
     let leading_onset = detect_leading_onset(&mono, audio.sample_rate);
 
     // Compute spectral flux across all frames
@@ -279,8 +276,24 @@ pub fn detect_onsets(audio: &AudioData, config: &OnsetConfig) -> Vec<Onset> {
         return leading_onset.into_iter().collect();
     }
 
-    // Apply adaptive threshold to pick onset peaks
+    // Spectral flux onset detection (good for mid/high-frequency transients)
     let mut onsets = pick_onset_peaks(&flux, audio.sample_rate, config);
+
+    // Broadband energy onset detection (catches low-frequency transients like kicks)
+    // Spectral flux is biased toward high-frequency changes because high bins outnumber
+    // low bins. This parallel detector uses RMS energy in short windows to catch
+    // amplitude transients at any frequency.
+    let energy_onsets = detect_energy_onsets(&mono, audio.sample_rate, config);
+    for eo in energy_onsets {
+        // Only add if not too close to an existing onset
+        let too_close = onsets.iter().any(|o| (o.timestamp_ms - eo.timestamp_ms).abs() < config.min_onset_gap_ms);
+        if !too_close {
+            onsets.push(eo);
+        }
+    }
+
+    // Sort by timestamp
+    onsets.sort_by(|a, b| a.timestamp_ms.partial_cmp(&b.timestamp_ms).unwrap());
 
     // Prepend the leading onset if it doesn't overlap with the first detected onset
     if let Some(leading) = leading_onset {
@@ -312,6 +325,66 @@ fn detect_leading_onset(mono: &[f32], sample_rate: u32) -> Option<Onset> {
     } else {
         None
     }
+}
+
+/// Detect onsets via broadband energy envelope.
+/// Complements spectral flux by catching low-frequency transients (kicks/bass)
+/// that spectral flux misses due to high-frequency bin count bias.
+///
+/// Algorithm: compute RMS in short windows, find frames where energy jumps
+/// significantly above the local average (using a ratio threshold).
+fn detect_energy_onsets(samples: &[f32], sample_rate: u32, config: &OnsetConfig) -> Vec<Onset> {
+    let hop_size = config.hop_size;
+    let window_size = config.hop_size * 2; // ~23ms at 44.1kHz with hop=512
+
+    if samples.len() < window_size || hop_size == 0 {
+        return Vec::new();
+    }
+
+    let num_frames = (samples.len() - window_size) / hop_size + 1;
+    if num_frames < 3 {
+        return Vec::new();
+    }
+
+    // Compute RMS energy per frame
+    let mut energies: Vec<f32> = Vec::with_capacity(num_frames);
+    for i in 0..num_frames {
+        let start = i * hop_size;
+        let end = (start + window_size).min(samples.len());
+        let rms = (samples[start..end].iter().map(|s| s * s).sum::<f32>() / (end - start) as f32).sqrt();
+        energies.push(rms);
+    }
+
+    // Compute local average energy using a sliding window of ~200ms
+    let avg_window = (sample_rate as usize / hop_size / 5).max(3); // ~200ms
+    let mut onsets = Vec::new();
+    let min_gap_frames = ((config.min_onset_gap_ms * sample_rate as f64 / 1000.0) as usize) / hop_size;
+    let mut last_onset_frame: usize = 0;
+
+    for i in 1..energies.len() {
+        // Local average over preceding frames
+        let avg_start = i.saturating_sub(avg_window);
+        let local_avg: f32 = energies[avg_start..i].iter().sum::<f32>() / (i - avg_start) as f32;
+
+        // Onset if current energy is significantly above local average
+        // and is a local maximum
+        let is_peak = energies[i] > energies[i - 1]
+            && (i + 1 >= energies.len() || energies[i] >= energies[i + 1]);
+        let is_strong = local_avg > 0.0 && energies[i] / local_avg > 3.0;
+        let abs_threshold = energies[i] > 0.03; // minimum absolute energy
+        let gap_ok = i.saturating_sub(last_onset_frame) >= min_gap_frames;
+
+        if is_peak && is_strong && abs_threshold && gap_ok {
+            let timestamp_ms = (i * hop_size) as f64 * 1000.0 / sample_rate as f64;
+            onsets.push(Onset {
+                timestamp_ms,
+                strength: (energies[i] / local_avg / 10.0).min(1.0),
+            });
+            last_onset_frame = i;
+        }
+    }
+
+    onsets
 }
 
 /// Compute spectral flux for all frames

@@ -256,3 +256,85 @@ writeWav('test-hum.wav', generateHum(1.0));
 writeWav('test-pattern.wav', generatePattern());
 
 console.log('\nAll files written to test-audio/');
+
+/**
+ * test-beatbox-realistic.wav — Realistic beatbox simulation
+ * "boots and cats" pattern with:
+ * - Timing jitter (±15ms from grid)
+ * - Amplitude variation (80-100%)
+ * - Background breath noise
+ * - Two measures at ~110 BPM
+ *
+ * Pattern per measure (4/4 at 110 BPM, beat = 545ms):
+ *   Beat 1: Kick (B)
+ *   Beat 1+: Hihat (ts)
+ *   Beat 2: Snare (k)
+ *   Beat 2+: Hihat (ts)
+ *   Beat 3: Kick (B)
+ *   Beat 3+: Hihat (ts)
+ *   Beat 4: Snare (k)
+ *   Beat 4+: Hihat (ts)
+ *
+ * Expected: 16 events, tempo ~110 BPM, alternating kick/hihat/snare/hihat
+ */
+function generateRealisticBeatbox() {
+  const bpm = 110;
+  const beatMs = 60000 / bpm; // ~545ms
+  const halfBeatMs = beatMs / 2;
+  const totalSec = (beatMs * 8 + 500) / 1000; // 2 measures + tail
+  const n = Math.floor(SAMPLE_RATE * totalSec);
+  const samples = new Float64Array(n);
+  const rand = seededRandom(789);
+
+  // Background breath noise (very low level)
+  for (let i = 0; i < n; i++) {
+    samples[i] = (rand() * 2 - 1) * 0.005;
+  }
+
+  const hits = [];
+
+  for (let measure = 0; measure < 2; measure++) {
+    const measureOffset = measure * beatMs * 4;
+
+    for (let beat = 0; beat < 4; beat++) {
+      const beatOffset = measureOffset + beat * beatMs;
+      const jitter = (rand() - 0.5) * 30; // ±15ms
+      const ampScale = 0.8 + rand() * 0.2; // 80-100%
+
+      // Downbeat: kick or snare
+      if (beat === 0 || beat === 2) {
+        hits.push({ time: (beatOffset + jitter) / 1000, gen: generateKick, amp: ampScale, label: 'kick' });
+      } else {
+        hits.push({ time: (beatOffset + jitter) / 1000, gen: generateSnare, amp: ampScale, label: 'snare' });
+      }
+
+      // Upbeat: hihat
+      const upbeatJitter = (rand() - 0.5) * 20; // ±10ms (tighter)
+      const hihatAmp = 0.5 + rand() * 0.3; // quieter
+      hits.push({ time: (beatOffset + halfBeatMs + upbeatJitter) / 1000, gen: generateHihat, amp: hihatAmp, label: 'hihat' });
+    }
+  }
+
+  // Add the hits to the sample buffer
+  for (const hit of hits) {
+    const hitSamples = hit.gen(0.3);
+    const startIdx = Math.max(0, Math.floor(hit.time * SAMPLE_RATE));
+    for (let i = 0; i < hitSamples.length && (startIdx + i) < n; i++) {
+      samples[startIdx + i] += hitSamples[i] * hit.amp;
+    }
+  }
+
+  // Normalize
+  let peak = 0;
+  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(samples[i]));
+  if (peak > 0.95) {
+    const scale = 0.95 / peak;
+    for (let i = 0; i < n; i++) samples[i] *= scale;
+  }
+
+  return samples;
+}
+
+// Generate the realistic beatbox file
+writeWav('test-beatbox-realistic.wav', generateRealisticBeatbox());
+console.log('\nRealistic beatbox test file generated.');
