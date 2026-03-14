@@ -182,39 +182,89 @@ export const invoke = async <T = any>(command: string, args?: any): Promise<T> =
       const bpm = args?.input?.bpm || 120;
       const barCount = args?.input?.bar_count || 4;
       const totalDurationMs = (barCount * 4 * 60000) / bpm;
+      const template = args?.input?.template || 'synthwave_straight';
 
       // Sort events into drum lanes by class
       const kickEvents: any[] = [];
       const snareEvents: any[] = [];
       const hihatEvents: any[] = [];
       const bassEvents: any[] = [];
+      const padEvents: any[] = [];
+      const arpEvents: any[] = [];
+
+      const msPerBeat = 60000 / bpm;
+      const msPerBar = msPerBeat * 4;
+
+      // Mock harmonic progression: Dm -> Bb -> F -> C
+      const chords = [
+        { root: 50, third: 53, fifth: 57 }, // Dm (D3, F3, A3)
+        { root: 58, third: 62, fifth: 65 }, // Bb (Bb3, D4, F4)
+        { root: 53, third: 57, fifth: 60 }, // F (F3, A3, C4)
+        { root: 60, third: 64, fifth: 67 }, // C (C4, E4, G4)
+      ];
+
+      let arpCounter = 0;
 
       for (const qe of quantizedEvents) {
         const event = qe.event || qe.original_event || qe;
         const cls = (event.class || '').toLowerCase();
+        const timestamp = qe.quantized_timestamp_ms ?? event.timestamp_ms ?? 0;
+        
         const note = {
-          timestamp_ms: qe.quantized_timestamp_ms ?? event.timestamp_ms ?? 0,
+          timestamp_ms: timestamp,
           duration_ms: event.duration_ms || 100,
           velocity: Math.floor((event.confidence || 0.8) * 127),
           source_event_id: event.id || null,
         };
 
-        if (cls.includes('bilabial')) { kickEvents.push(note); bassEvents.push({ ...note, duration_ms: 200 }); }
-        else if (cls.includes('hihat')) hihatEvents.push(note);
-        else if (cls.includes('click')) snareEvents.push(note);
-        else bassEvents.push(note);
+        // Determine active chord (2 bars per chord)
+        const bar = Math.floor(timestamp / msPerBar);
+        const chordIndex = Math.floor((bar % 8) / 2); 
+        const currentChord = chords[chordIndex];
+
+        if (cls.includes('bilabial')) { 
+          kickEvents.push(note); 
+          
+          // Bass pattern: Root on downbeats, Fifth on upbeats/offbeats
+          const beatInBar = Math.floor((timestamp % msPerBar) / msPerBeat);
+          const isOffbeat = beatInBar % 2 !== 0;
+          const bassMidi = isOffbeat ? currentChord.fifth - 12 : currentChord.root - 12;
+          
+          bassEvents.push({ ...note, duration_ms: 200, midi_note: bassMidi }); 
+        }
+        else if (cls.includes('hihat')) {
+          hihatEvents.push(note);
+          
+          // Rhythmic Puppeteering for Arps
+          if (template === 'arp_drive') {
+            const arpPattern = [currentChord.root + 12, currentChord.third + 12, currentChord.fifth + 12, currentChord.root + 24];
+            const arpMidi = arpPattern[arpCounter % arpPattern.length];
+            arpEvents.push({ ...note, duration_ms: 150, velocity: note.velocity * 0.9, midi_note: arpMidi });
+            arpCounter++;
+          }
+        }
+        else if (cls.includes('click')) {
+          snareEvents.push(note);
+        }
+        else {
+          // Hum -> Pads (Triad)
+          const padDuration = Math.max(400, event.duration_ms || 400);
+          padEvents.push({ ...note, duration_ms: padDuration, velocity: note.velocity * 0.8, midi_note: currentChord.root });
+          padEvents.push({ ...note, duration_ms: padDuration, velocity: note.velocity * 0.8, midi_note: currentChord.third });
+          padEvents.push({ ...note, duration_ms: padDuration, velocity: note.velocity * 0.8, midi_note: currentChord.fifth });
+        }
       }
 
       return {
         drum_lanes: [
-          { name: 'KICK', midi_note: 36, events: kickEvents },
-          { name: 'SNARE', midi_note: 38, events: snareEvents },
-          { name: 'HIHAT', midi_note: 42, events: hihatEvents },
+          { name: 'DRUMS_KICK', midi_note: 36, events: kickEvents },
+          { name: 'DRUMS_SNARE', midi_note: 38, events: snareEvents },
+          { name: 'DRUMS_HIHAT', midi_note: 42, events: hihatEvents },
         ],
         bass_lane: { name: 'BASS', midi_note: 36, events: bassEvents },
-        pad_lane: { name: 'PAD', midi_note: 60, events: [] },
-        arp_lane: null,
-        template: args?.input?.template || 'synthwave_straight',
+        pad_lane: { name: 'PADS', midi_note: 48, events: padEvents },
+        arp_lane: { name: 'ARP', midi_note: 60, events: arpEvents },
+        template,
         total_duration_ms: totalDurationMs,
         bar_count: barCount,
       } as T;
