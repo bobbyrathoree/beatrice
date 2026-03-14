@@ -275,6 +275,11 @@ function scheduleBass(
   const durSec = Math.max(0.05, durationMs / 1000);
   const master = getMasterBus(ctx);
 
+  // Velocity to filter cutoff (The Growl)
+  const velFactor = Math.pow(velocity / 127, 2); // Exponential mapping
+  const filterOpen = freq * (2 + 6 * velFactor);
+  const filterClose = freq * (1 + 1.5 * velFactor);
+
   // === Dual detuned sawtooth oscillators for width ===
   const osc1 = ctx.createOscillator();
   osc1.type = 'sawtooth';
@@ -292,8 +297,8 @@ function scheduleBass(
   // === Filter with envelope (the sweep that gives bass its character) ===
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(freq * 6, time);      // open
-  filter.frequency.exponentialRampToValueAtTime(freq * 1.5, time + durSec * 0.6); // close
+  filter.frequency.setValueAtTime(filterOpen, time);      // open
+  filter.frequency.exponentialRampToValueAtTime(filterClose, time + durSec * 0.6); // close
   filter.Q.setValueAtTime(2, time);
 
   // Amplitude envelope
@@ -345,12 +350,17 @@ function schedulePad(
   padBus.gain.setValueAtTime(gain * 0.22, time + durSec * 0.8);     // sustain
   padBus.gain.exponentialRampToValueAtTime(0.001, time + durSec);    // release
 
+  // Velocity to filter cutoff
+  const velFactor = Math.pow(velocity / 127, 2);
+  const padBaseFreq = 800 + 1000 * velFactor;
+  const padSweepFreq = 1500 + 2000 * velFactor;
+
   // Slow filter sweep for movement
   const padFilter = ctx.createBiquadFilter();
   padFilter.type = 'lowpass';
-  padFilter.frequency.setValueAtTime(1500, time);
-  padFilter.frequency.linearRampToValueAtTime(800, time + durSec * 0.5);
-  padFilter.frequency.linearRampToValueAtTime(1200, time + durSec);
+  padFilter.frequency.setValueAtTime(padSweepFreq, time);
+  padFilter.frequency.linearRampToValueAtTime(padBaseFreq, time + durSec * 0.5);
+  padFilter.frequency.linearRampToValueAtTime(padBaseFreq * 1.5, time + durSec);
   padFilter.Q.setValueAtTime(1.5, time);
 
   for (let i = 0; i < 4; i++) {
@@ -571,8 +581,10 @@ export function useAudioPlayback() {
     }
 
     const totalDurationSec = totalDurationMs / 1000;
-    durationRef.current = totalDurationSec;
-    setDuration(totalDurationSec);
+    
+    // Song Mode: Loop 4 times with dynamic muting
+    durationRef.current = totalDurationSec * 4;
+    setDuration(totalDurationSec * 4);
 
     // Create a fresh AudioContext
     const ctx = new AudioContext();
@@ -585,13 +597,52 @@ export function useAudioPlayback() {
     // Initialize master bus
     getMasterBus(ctx);
 
-    // Schedule all notes
+    // Schedule all notes across 4 loops
     const startTime = ctx.currentTime + 0.05;
     playStartRef.current = startTime;
 
-    for (const lane of lanes) {
-      for (const note of lane.events) {
-        scheduleNote(ctx, lane.name, note.midi_note ?? lane.midi_note, note, startTime);
+    for (let loopIdx = 0; loopIdx < 4; loopIdx++) {
+      const loopOffset = loopIdx * totalDurationSec;
+      
+      for (const lane of lanes) {
+        const laneName = lane.name.toUpperCase();
+        
+        // Dynamic Mute Mask
+        // Loop 0 (Intro): KICK, HIHAT
+        // Loop 1 (Build): KICK, HIHAT, SNARE, BASS
+        // Loop 2 (Drop): All (KICK, HIHAT, SNARE, BASS, PADS, ARP)
+        // Loop 3 (Outro): BASS only (fading out)
+        let shouldPlay = true;
+        
+        if (loopIdx === 0) {
+          shouldPlay = laneName.includes('KICK') || laneName.includes('HIHAT') || laneName.includes('HAT');
+        } else if (loopIdx === 1) {
+          shouldPlay = laneName.includes('KICK') || laneName.includes('HIHAT') || laneName.includes('HAT') || laneName.includes('SNARE') || laneName.includes('CLAP') || laneName.includes('BASS');
+        } else if (loopIdx === 2) {
+          shouldPlay = true; // All play
+        } else if (loopIdx === 3) {
+          shouldPlay = laneName.includes('BASS');
+        }
+
+        if (!shouldPlay) continue;
+
+        for (const note of lane.events) {
+          const noteCopy = { ...note };
+          
+          // Adjust velocity for loop 3 (outro fade)
+          if (loopIdx === 3 && laneName.includes('BASS')) {
+            const fadeRatio = 1.0 - (note.timestamp_ms / totalDurationMs);
+            noteCopy.velocity = Math.floor(note.velocity * Math.max(0.2, fadeRatio));
+          }
+          
+          scheduleNote(
+            ctx, 
+            lane.name, 
+            noteCopy.midi_note ?? lane.midi_note, 
+            noteCopy, 
+            startTime + loopOffset
+          );
+        }
       }
     }
 
