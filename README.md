@@ -4,8 +4,9 @@
 
 Beatrice is a desktop app that transforms beatbox performances into harmonically intelligent synthesizer arrangements. You provide the rhythm with your mouth — kicks, hi-hats, snares, and hums — and Beatrice detects each sound, classifies it, estimates your tempo, and arranges everything into a multi-track composition that follows real chord progressions.
 
-<!-- Replace with your generated logo -->
-<!-- ![Beatrice Logo](docs/logo.png) -->
+<p align="center">
+  <img src="docs/logo.png" alt="Beatrice Logo" width="300">
+</p>
 
 ## How It Works
 
