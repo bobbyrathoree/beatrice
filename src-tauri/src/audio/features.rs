@@ -51,7 +51,7 @@ impl Default for OnsetConfig {
             window_size: 2048,
             hop_size: 512,
             threshold_factor: 2.0, // Require flux to be 2.0 std devs above mean
-            min_onset_gap_ms: 90.0, // ~90ms minimum gap prevents sub-event triggers
+            min_onset_gap_ms: 120.0, // Increased to 120ms to prevent double-triggers on human plosives
             min_flux_threshold: 0.0, // Computed dynamically if left at 0.0
         }
     }
