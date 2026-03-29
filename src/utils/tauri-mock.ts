@@ -134,8 +134,9 @@ export const invoke = async <T = any>(command: string, args?: any): Promise<T> =
 
     // --- Event detection (match Rust EventDetectionResult) ---
     case 'detect_events': {
-      const audioData = args?.input?.audio_data || [];
-      const events = generateMockEvents(audioData);
+      // In mock mode, generate events from stored audio data (saved by create_project)
+      const storedData = lastProjectAudioData ? Array.from(lastProjectAudioData) : [];
+      const events = generateMockEvents(storedData);
       return { events, total_count: events.length } as T;
     }
 
@@ -255,18 +256,53 @@ export const invoke = async <T = any>(command: string, args?: any): Promise<T> =
         }
       }
 
+      // Expand base pattern into song (Intro/Build/Drop/Outro) — mirrors Rust expand_to_song()
+      const baseDurationMs = totalDurationMs;
+      const cloneToSection = (events: any[], section: number, fade: boolean) =>
+        events.map(e => {
+          const cloned = { ...e, timestamp_ms: e.timestamp_ms + section * baseDurationMs };
+          if (fade) {
+            const progress = e.timestamp_ms / baseDurationMs;
+            cloned.velocity = Math.max(1, Math.floor(e.velocity * Math.max(0.2, 1.0 - progress)));
+          }
+          return cloned;
+        });
+
+      const isKick = (n: string) => n.toUpperCase().includes('KICK');
+      const isHihat = (n: string) => { const u = n.toUpperCase(); return u.includes('HIHAT') || u.includes('HAT'); };
+      const isSnare = (n: string) => { const u = n.toUpperCase(); return u.includes('SNARE') || u.includes('CLAP'); };
+
+      const expandDrum = (name: string, events: any[]) => {
+        const expanded: any[] = [];
+        for (let s = 0; s < 4; s++) {
+          const include = s === 0 ? (isKick(name) || isHihat(name))
+            : s === 1 ? (isKick(name) || isHihat(name) || isSnare(name))
+            : s === 2 ? true : false;
+          if (include) expanded.push(...cloneToSection(events, s, false));
+        }
+        return expanded;
+      };
+
+      const expandBass = (events: any[]) => {
+        const expanded: any[] = [];
+        for (let s = 1; s < 4; s++) expanded.push(...cloneToSection(events, s, s === 3));
+        return expanded;
+      };
+
+      const expandDropOnly = (events: any[]) => cloneToSection(events, 2, false);
+
       return {
         drum_lanes: [
-          { name: 'DRUMS_KICK', midi_note: 36, events: kickEvents },
-          { name: 'DRUMS_SNARE', midi_note: 38, events: snareEvents },
-          { name: 'DRUMS_HIHAT', midi_note: 42, events: hihatEvents },
+          { name: 'DRUMS_KICK', midi_note: 36, events: expandDrum('DRUMS_KICK', kickEvents) },
+          { name: 'DRUMS_SNARE', midi_note: 38, events: expandDrum('DRUMS_SNARE', snareEvents) },
+          { name: 'DRUMS_HIHAT', midi_note: 42, events: expandDrum('DRUMS_HIHAT', hihatEvents) },
         ],
-        bass_lane: { name: 'BASS', midi_note: 36, events: bassEvents },
-        pad_lane: { name: 'PADS', midi_note: 48, events: padEvents },
-        arp_lane: { name: 'ARP', midi_note: 60, events: arpEvents },
+        bass_lane: { name: 'BASS', midi_note: 36, events: expandBass(bassEvents) },
+        pad_lane: { name: 'PADS', midi_note: 48, events: expandDropOnly(padEvents) },
+        arp_lane: { name: 'ARP', midi_note: 60, events: expandDropOnly(arpEvents) },
         template,
-        total_duration_ms: totalDurationMs,
-        bar_count: barCount,
+        total_duration_ms: baseDurationMs * 4,
+        bar_count: barCount * 4,
       } as T;
     }
 

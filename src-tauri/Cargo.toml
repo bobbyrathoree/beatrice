@@ -27,8 +27,6 @@ log = "0.4"
 
 # Audio
 hound = "3.5"                      # WAV read/write
-rodio = "0.20"                     # Audio playback
-fundsp = "0.18"                    # DSP/synth
 cpal = "0.15"                      # Cross-platform audio recording
 
 # MIDI

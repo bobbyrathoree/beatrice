@@ -492,7 +492,7 @@ function calculateArrangementDuration(arrangement: any, bpm: number): number {
     totalDurationMs = (barCount * 4 * 60 * 1000) / bpm;
   }
 
-  return (totalDurationMs / 1000) * 4; // Song Mode: 4 loops
+  return totalDurationMs / 1000; // Duration from arrangement (song structure is in the data)
 }
 
 export function useAudioPlayback(initialArrangement?: any, initialBpm?: number) {
@@ -645,8 +645,7 @@ export function useAudioPlayback(initialArrangement?: any, initialBpm?: number) 
     }
 
     const songDurationSec = calculateArrangementDuration(arr, bpm);
-    const loopDurationSec = songDurationSec / 4;
-    
+
     durationRef.current = songDurationSec;
     setDuration(songDurationSec);
 
@@ -661,52 +660,20 @@ export function useAudioPlayback(initialArrangement?: any, initialBpm?: number) 
     // Initialize master bus
     getMasterBus(ctx);
 
-    // Schedule all notes across 4 loops
+    // Schedule all notes directly — song structure (Intro/Build/Drop/Outro)
+    // is already baked into the arrangement by the Rust arranger
     const startTime = ctx.currentTime + 0.05;
     playStartRef.current = startTime;
 
-    for (let loopIdx = 0; loopIdx < 4; loopIdx++) {
-      const loopOffset = loopIdx * loopDurationSec;
-      
-      for (const lane of lanes) {
-        const laneName = lane.name.toUpperCase();
-        
-        // Dynamic Mute Mask
-        // Loop 0 (Intro): KICK, HIHAT
-        // Loop 1 (Build): KICK, HIHAT, SNARE, BASS
-        // Loop 2 (Drop): All (KICK, HIHAT, SNARE, BASS, PADS, ARP)
-        // Loop 3 (Outro): BASS only (fading out)
-        let shouldPlay = true;
-        
-        if (loopIdx === 0) {
-          shouldPlay = laneName.includes('KICK') || laneName.includes('HIHAT') || laneName.includes('HAT');
-        } else if (loopIdx === 1) {
-          shouldPlay = laneName.includes('KICK') || laneName.includes('HIHAT') || laneName.includes('HAT') || laneName.includes('SNARE') || laneName.includes('CLAP') || laneName.includes('BASS');
-        } else if (loopIdx === 2) {
-          shouldPlay = true; // All play
-        } else if (loopIdx === 3) {
-          shouldPlay = laneName.includes('BASS');
-        }
-
-        if (!shouldPlay) continue;
-
-        for (const note of lane.events) {
-          const noteCopy = { ...note };
-          
-          // Adjust velocity for loop 3 (outro fade)
-          if (loopIdx === 3 && laneName.includes('BASS')) {
-            const fadeRatio = 1.0 - (note.timestamp_ms / (loopDurationSec * 1000));
-            noteCopy.velocity = Math.floor(note.velocity * Math.max(0.2, fadeRatio));
-          }
-          
-          scheduleNote(
-            ctx, 
-            lane.name, 
-            noteCopy.midi_note ?? lane.midi_note, 
-            noteCopy, 
-            startTime + loopOffset
-          );
-        }
+    for (const lane of lanes) {
+      for (const note of lane.events) {
+        scheduleNote(
+          ctx,
+          lane.name,
+          note.midi_note ?? lane.midi_note,
+          note,
+          startTime
+        );
       }
     }
 

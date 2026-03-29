@@ -158,6 +158,121 @@ impl Arrangement {
         }
         lanes
     }
+
+    /// Expand a base pattern into a full song with 4 sections:
+    /// - Intro:  Kick + Hihat only
+    /// - Build:  Kick + Hihat + Snare + Bass
+    /// - Drop:   Everything (all lanes)
+    /// - Outro:  Bass only, velocity fading out
+    ///
+    /// The base pattern is repeated 4 times. Each section applies a mute mask
+    /// that filters which lanes are active. The result is a complete arrangement
+    /// that matches what users hear during playback.
+    pub fn expand_to_song(&self) -> Arrangement {
+        let base_duration = self.total_duration_ms;
+        let base_bars = self.bar_count;
+        let song_bars = base_bars * 4;
+        let song_duration = base_duration * 4.0;
+
+        let mut song = Arrangement::new(self.template, song_duration, song_bars);
+
+        // Helper: clone a lane's events into a section, offset by section start time
+        let clone_lane_to_section = |lane: &DrumLane, section: usize, fade: bool| -> Vec<ArrangedNote> {
+            let offset = section as f64 * base_duration;
+            lane.events.iter().map(|note| {
+                let mut cloned = note.clone();
+                cloned.timestamp_ms += offset;
+                if fade {
+                    // Outro fade: velocity decreases linearly across the section
+                    let progress = (note.timestamp_ms / base_duration) as f32;
+                    let fade_factor = (1.0f32 - progress).max(0.2);
+                    cloned.velocity = ((cloned.velocity as f32 * fade_factor) as u8).max(1);
+                }
+                cloned
+            }).collect()
+        };
+
+        // Determine which lane name matches which instrument group
+        let is_kick = |name: &str| name.to_uppercase().contains("KICK");
+        let is_hihat = |name: &str| {
+            let n = name.to_uppercase();
+            n.contains("HIHAT") || n.contains("HAT")
+        };
+        let is_snare = |name: &str| {
+            let n = name.to_uppercase();
+            n.contains("SNARE") || n.contains("CLAP")
+        };
+
+        // Expand drum lanes
+        for base_lane in &self.drum_lanes {
+            let mut expanded = DrumLane::new(&base_lane.name, base_lane.midi_note);
+
+            for section in 0..4 {
+                let should_include = match section {
+                    0 => is_kick(&base_lane.name) || is_hihat(&base_lane.name), // Intro
+                    1 => is_kick(&base_lane.name) || is_hihat(&base_lane.name) || is_snare(&base_lane.name), // Build
+                    2 => true, // Drop: all drums
+                    3 => false, // Outro: no drums
+                    _ => false,
+                };
+
+                if should_include {
+                    expanded.events.extend(clone_lane_to_section(base_lane, section, false));
+                }
+            }
+
+            expanded.sort_by_time();
+            song.add_drum_lane(expanded);
+        }
+
+        // Expand bass lane
+        if let Some(ref base_bass) = self.bass_lane {
+            let mut expanded = DrumLane::new(&base_bass.name, base_bass.midi_note);
+            for section in 0..4 {
+                let should_include = match section {
+                    0 => false,  // Intro: no bass
+                    1 => true,   // Build: bass enters
+                    2 => true,   // Drop: bass
+                    3 => true,   // Outro: bass with fade
+                    _ => false,
+                };
+                if should_include {
+                    let fade = section == 3;
+                    expanded.events.extend(clone_lane_to_section(base_bass, section, fade));
+                }
+            }
+            expanded.sort_by_time();
+            song.bass_lane = Some(expanded);
+        }
+
+        // Expand pad lane
+        if let Some(ref base_pad) = self.pad_lane {
+            let mut expanded = DrumLane::new(&base_pad.name, base_pad.midi_note);
+            for section in 0..4 {
+                // Pads only in Drop
+                if section == 2 {
+                    expanded.events.extend(clone_lane_to_section(base_pad, section, false));
+                }
+            }
+            expanded.sort_by_time();
+            song.pad_lane = Some(expanded);
+        }
+
+        // Expand arp lane
+        if let Some(ref base_arp) = self.arp_lane {
+            let mut expanded = DrumLane::new(&base_arp.name, base_arp.midi_note);
+            for section in 0..4 {
+                // Arp only in Drop
+                if section == 2 {
+                    expanded.events.extend(clone_lane_to_section(base_arp, section, false));
+                }
+            }
+            expanded.sort_by_time();
+            song.arp_lane = Some(expanded);
+        }
+
+        song
+    }
 }
 
 use crate::themes::{Theme, scale_notes, chord_notes, bass_notes, arp_notes};

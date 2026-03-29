@@ -164,7 +164,7 @@ function App() {
       setAudioData(audioBytes);
       setIsAudioLoading(false);
 
-      await runPipeline(project, audioBytes);
+      await runPipeline(project);
     } catch (err) {
       setIsAudioLoading(false);
       setIsPipelineRunning(false);
@@ -216,7 +216,7 @@ function App() {
   };
 
   // Run the full pipeline
-  const runPipeline = async (_project: Project, audioBytes: Uint8Array) => {
+  const runPipeline = async (_project: Project) => {
     if (isPipelineRunning) {
       console.warn("Pipeline already running, ignoring duplicate request");
       return;
@@ -226,20 +226,11 @@ function App() {
     setProcessingProgress(0);
 
     try {
-      // Validate audio data (WAV header is 44 bytes minimum)
-      if (!audioBytes?.length) {
-        throw new Error("No audio data to process");
-      }
-
-      if (audioBytes.length <= 44) {
-        throw new Error("Audio file too short to process");
-      }
-
-      // Step 1: Detect events
+      // Step 1: Detect events (Rust reads from disk via file_path)
       setProcessingProgress(0.1);
       const eventResult = await invoke<{ events: EventData[] }>("detect_events", {
         input: {
-          audio_data: Array.from(audioBytes),
+          file_path: _project.input_path,
           run_id: null,
           use_calibration: false,
           calibration_profile_id: null,
@@ -257,7 +248,7 @@ function App() {
       // Step 2: Estimate tempo
       const tempoResult = await invoke<{ bpm: number }>("estimate_tempo", {
         input: {
-          audio_data: Array.from(audioBytes),
+          file_path: _project.input_path,
         },
       }).catch(err => {
         throw new Error(`Tempo estimation failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -619,7 +610,7 @@ function App() {
       setAudioData(audioBytes);
       setIsAudioLoading(false);
 
-      await runPipeline(fullProject, audioBytes);
+      await runPipeline(fullProject);
     } catch (err) {
       handleError(`Failed to load run: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -864,6 +855,18 @@ function App() {
               exit={{ opacity: 0, y: 20 }}
               transition={{ duration: 0.3 }}
             >
+              {/* Playback Controls — sticky at top */}
+              {pipelineResult?.arrangement && (
+                <PlaybackControls
+                  isPlaying={isPlaying}
+                  currentTime={currentTime}
+                  duration={duration}
+                  onPlay={() => playAudio(pipelineResult.arrangement, gridSettings.bpm)}
+                  onStop={stopAudio}
+                  theme={selectedTheme}
+                />
+              )}
+
               {/* Waveform Display */}
               <Waveform
                 audioData={audioData || undefined}
@@ -877,24 +880,6 @@ function App() {
                 duration={pipelineResult?.duration_ms || 10000}
                 onMarkerClick={(event) => setSelectedEventId(event.event_id)}
               />
-
-              {/* Playback Controls */}
-              {pipelineResult?.arrangement && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.12 }}
-                >
-                  <PlaybackControls
-                    isPlaying={isPlaying}
-                    currentTime={currentTime}
-                    duration={duration}
-                    onPlay={() => playAudio(pipelineResult.arrangement, gridSettings.bpm)}
-                    onStop={stopAudio}
-                    theme={selectedTheme}
-                  />
-                </motion.div>
-              )}
 
               {/* Event Timeline */}
               {pipelineResult?.events && pipelineResult.events.length > 0 && (

@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { EventDecision, EVENT_CLASS_NAMES, EVENT_CLASS_COLORS } from '../../types/explainability';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ModelInspector } from './ModelInspector';
 
 interface DecisionCardProps {
@@ -10,6 +10,16 @@ interface DecisionCardProps {
 
 export function DecisionCard({ event, onClose }: DecisionCardProps) {
   const [showModelInspector, setShowModelInspector] = useState(false);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!event) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [event, onClose]);
 
   if (!event) return null;
 

@@ -367,7 +367,7 @@ pub struct EventData {
 
 #[derive(Debug, Deserialize)]
 pub struct DetectEventsInput {
-    pub audio_data: Vec<u8>,
+    pub file_path: String,
     pub run_id: Option<String>,
     pub use_calibration: bool,
     pub calibration_profile_id: Option<String>,
@@ -379,8 +379,24 @@ pub async fn detect_events(
     db: State<'_, DbConnection>,
     input: DetectEventsInput,
 ) -> CommandResult<EventDetectionResult> {
-    // Ingest audio
-    let audio = audio::ingest_wav(&input.audio_data).map_err(|e| CommandError {
+    // Read audio from disk with size limit (50MB)
+    const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
+    let metadata = std::fs::metadata(&input.file_path).map_err(|e| CommandError {
+        message: format!("Cannot access audio file: {}", e),
+    })?;
+    if metadata.len() > MAX_FILE_SIZE {
+        return Err(CommandError {
+            message: format!(
+                "Audio file too large ({:.1}MB). Maximum is {:.0}MB.",
+                metadata.len() as f64 / 1_048_576.0,
+                MAX_FILE_SIZE as f64 / 1_048_576.0,
+            ),
+        });
+    }
+    let file_bytes = std::fs::read(&input.file_path).map_err(|e| CommandError {
+        message: format!("Failed to read audio file: {}", e),
+    })?;
+    let audio = audio::ingest_wav(&file_bytes).map_err(|e| CommandError {
         message: format!("Failed to ingest audio: {}", e),
     })?;
 
@@ -563,14 +579,17 @@ pub fn extract_features(input: ExtractFeaturesInput) -> CommandResult<EventFeatu
 
 #[derive(Debug, Deserialize)]
 pub struct EstimateTempoInput {
-    pub audio_data: Vec<u8>,
+    pub file_path: String,
 }
 
 /// Estimate tempo (BPM) from audio data
 #[tauri::command]
 pub fn estimate_tempo(input: EstimateTempoInput) -> CommandResult<TempoEstimate> {
-    // Ingest audio
-    let audio = audio::ingest_wav(&input.audio_data).map_err(|e| CommandError {
+    // Read audio from disk
+    let file_bytes = std::fs::read(&input.file_path).map_err(|e| CommandError {
+        message: format!("Failed to read audio file: {}", e),
+    })?;
+    let audio = audio::ingest_wav(&file_bytes).map_err(|e| CommandError {
         message: format!("Failed to ingest audio: {}", e),
     })?;
 
@@ -730,13 +749,16 @@ pub fn arrange_events_command(input: ArrangeEventsInput) -> CommandResult<Arrang
     );
 
     // Arrange events with harmonic context
-    let arrangement = arranger::arrange_events(
+    let base_arrangement = arranger::arrange_events(
         &input.events,
         &template,
         &grid,
         &theme,
         input.b_emphasis
     );
+
+    // Expand base pattern into full song (Intro/Build/Drop/Outro)
+    let arrangement = base_arrangement.expand_to_song();
 
     Ok(arrangement)
 }
