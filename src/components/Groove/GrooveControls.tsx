@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import type { TempoEstimate } from '../../types/ipc';
 
 export interface GridSettings {
   bpm: number;
@@ -17,16 +18,15 @@ export interface QuantizeSettings {
 }
 
 interface GrooveControlsProps {
-  // `audioData` is accepted for API compatibility with App.tsx but no longer used
-  // here: automatic tempo estimation was removed (the previous `estimate_tempo`
-  // invoke passed `audio_data` while the backend expects a `file_path`). Task 6
-  // restores honest tempo estimation. BPM is driven by the manual control below.
-  audioData?: Uint8Array;
+  // Detected tempo from the pipeline (Task 2's `PipelineResult.tempo`). When
+  // present, its BPM/confidence are displayed and the AUTO button applies it.
+  tempoEstimate: TempoEstimate | null;
   onGridChange: (settings: GridSettings) => void;
   onQuantizeChange: (settings: QuantizeSettings) => void;
 }
 
 export function GrooveControls({
+  tempoEstimate,
   onGridChange,
   onQuantizeChange,
 }: GrooveControlsProps) {
@@ -37,14 +37,17 @@ export function GrooveControls({
   // Grid settings
   const [timeSignature, setTimeSignature] = useState<'four_four' | 'three_four'>('four_four');
   const [division, setDivision] = useState<'quarter' | 'eighth' | 'sixteenth' | 'triplet'>('sixteenth');
-  const [feel, setFeel] = useState<'straight' | 'swing' | 'halftime'>('straight');
+  const [feel, setFeel] = useState<'straight' | 'swing'>('straight');
   const [swingAmount, setSwingAmount] = useState<number>(0);
   const [barCount, setBarCount] = useState<number>(4);
 
   // Quantize settings
   const [quantizeStrength, setQuantizeStrength] = useState<number>(0.8);
 
-  const currentBpm = useManualBpm ? manualBpm : 120;
+  // BPM sent downstream: manual override if enabled, otherwise the detected
+  // tempo when available, else a neutral fallback.
+  const detectedBpm = tempoEstimate ? tempoEstimate.bpm : 120;
+  const currentBpm = useManualBpm ? manualBpm : detectedBpm;
 
   // Update grid settings
   useEffect(() => {
@@ -57,7 +60,7 @@ export function GrooveControls({
       bar_count: barCount,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useManualBpm, manualBpm, timeSignature, division, feel, swingAmount, barCount]);
+  }, [useManualBpm, manualBpm, currentBpm, timeSignature, division, feel, swingAmount, barCount]);
 
   // Update quantize settings
   useEffect(() => {
@@ -107,13 +110,28 @@ export function GrooveControls({
               {Math.round(currentBpm)}
             </div>
             <div style={{ fontSize: '14px', fontWeight: 'bold' }}>BPM</div>
+            {tempoEstimate && !useManualBpm && (
+              <div style={{ fontSize: '11px', fontWeight: 'bold', marginTop: '4px' }}>
+                DETECTED · {Math.round(tempoEstimate.confidence * 100)}% CONF
+              </div>
+            )}
           </div>
 
           {/* Manual Override Toggle */}
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => setUseManualBpm(!useManualBpm)}
+            onClick={() => {
+              if (useManualBpm) {
+                // Switch to AUTO: adopt the detected tempo (no IPC).
+                if (tempoEstimate) setManualBpm(Math.round(tempoEstimate.bpm));
+                setUseManualBpm(false);
+              } else {
+                // Switch to MANUAL: seed the input with the current value.
+                setManualBpm(Math.round(currentBpm));
+                setUseManualBpm(true);
+              }
+            }}
             style={{
               border: '3px solid #000',
               borderRadius: '4px',
@@ -226,7 +244,7 @@ export function GrooveControls({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <label style={{ fontSize: '14px', fontWeight: 'bold' }}>FEEL</label>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {(['straight', 'swing', 'halftime'] as const).map((f) => (
+            {(['straight', 'swing'] as const).map((f) => (
               <motion.button
                 key={f}
                 whileHover={{ scale: 1.05 }}
@@ -284,29 +302,40 @@ export function GrooveControls({
           QUANTIZE
         </h3>
 
-        {/* Swing Amount */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <label style={{ fontSize: '14px', fontWeight: 'bold' }}>SWING</label>
-            <span style={{ fontSize: '18px', fontWeight: 'bold' }}>{swingAmount}%</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={swingAmount}
-            onChange={(e) => setSwingAmount(Number(e.target.value))}
-            style={{
-              width: '100%',
-              height: '8px',
-              borderRadius: '4px',
-              border: '2px solid #000',
-              background: `linear-gradient(to right, #FF00FF 0%, #FF00FF ${swingAmount}%, #E0E0E0 ${swingAmount}%, #E0E0E0 100%)`,
-              outline: 'none',
-              cursor: 'pointer',
-            }}
-          />
-        </div>
+        {/* Swing Amount — only meaningful when FEEL is "swing" */}
+        {(() => {
+          const swingDisabled = feel !== 'swing';
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', opacity: swingDisabled ? 0.5 : 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '14px', fontWeight: 'bold' }}>SWING</label>
+                <span style={{ fontSize: '18px', fontWeight: 'bold' }}>{swingAmount}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={swingAmount}
+                disabled={swingDisabled}
+                onChange={(e) => setSwingAmount(Number(e.target.value))}
+                style={{
+                  width: '100%',
+                  height: '8px',
+                  borderRadius: '4px',
+                  border: '2px solid #000',
+                  background: `linear-gradient(to right, #FF00FF 0%, #FF00FF ${swingAmount}%, #E0E0E0 ${swingAmount}%, #E0E0E0 100%)`,
+                  outline: 'none',
+                  cursor: swingDisabled ? 'not-allowed' : 'pointer',
+                }}
+              />
+              {swingDisabled && (
+                <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#888' }}>
+                  enable FEEL: swing
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Quantize Strength */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

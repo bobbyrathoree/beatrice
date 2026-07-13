@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
-import { commands, unwrap } from '../types/ipc';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { commands, unwrap, formatIpcError } from '../types/ipc';
 
 export interface AudioRecorderState {
   isRecording: boolean;
@@ -32,68 +32,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const timerRef = useRef<number | null>(null);
   const levelRef = useRef<number>(0);
   const levelIntervalRef = useRef<number | null>(null);
-
-  const startRecording = useCallback(async () => {
-    try {
-      // Call Rust backend to start recording
-      unwrap(await commands.startRecording());
-
-      // Start timer
-      startTimeRef.current = Date.now();
-
-      timerRef.current = window.setInterval(() => {
-        const elapsed = Date.now() - startTimeRef.current;
-
-        setState((prev) => ({
-          ...prev,
-          duration: elapsed,
-        }));
-
-        // Auto-stop at max duration
-        if (elapsed >= MAX_DURATION) {
-          stopRecording();
-        }
-      }, 50);
-
-      // Poll audio level from Rust
-      levelIntervalRef.current = window.setInterval(async () => {
-        try {
-          const level = unwrap(await commands.getRecordingLevel());
-          levelRef.current = level;
-        } catch {
-          // Ignore level polling errors
-        }
-      }, 100);
-
-      setState({
-        isRecording: true,
-        isPaused: false,
-        duration: 0,
-        audioData: null,
-        error: null,
-      });
-    } catch (err) {
-      // Handle various error formats from Tauri
-      let errorMessage: string;
-      if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (typeof err === 'string') {
-        errorMessage = err;
-      } else if (err && typeof err === 'object' && 'message' in err) {
-        errorMessage = (err as { message: string }).message;
-      } else {
-        errorMessage = 'Unknown error occurred';
-      }
-      setState((prev) => ({
-        ...prev,
-        error: errorMessage,
-      }));
-      console.error('Error starting recording:', err);
-    }
-  }, []);
+  // Mirror `isRecording` so callbacks/cleanup read the latest value without
+  // depending on it (avoids stale closures and unstable callback identities).
+  const isRecordingRef = useRef(false);
 
   const stopRecording = useCallback(async () => {
-    if (!state.isRecording) return;
+    if (!isRecordingRef.current) return;
+    isRecordingRef.current = false;
 
     try {
       // Stop timers
@@ -119,25 +64,81 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         audioData,
       }));
     } catch (err) {
-      // Handle various error formats from Tauri
-      let errorMessage: string;
-      if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (typeof err === 'string') {
-        errorMessage = err;
-      } else if (err && typeof err === 'object' && 'message' in err) {
-        errorMessage = (err as { message: string }).message;
-      } else {
-        errorMessage = 'Unknown error occurred';
-      }
       setState((prev) => ({
         ...prev,
         isRecording: false,
-        error: errorMessage,
+        error: formatIpcError(err),
       }));
       console.error('Error stopping recording:', err);
     }
-  }, [state.isRecording]);
+  }, []);
+
+  // Keep the latest `stopRecording` in a ref so the interval body and unmount
+  // cleanup always call the current implementation, not a stale closure.
+  const stopRef = useRef<() => Promise<void>>(stopRecording);
+  useEffect(() => {
+    stopRef.current = stopRecording;
+  });
+
+  const startRecording = useCallback(async () => {
+    try {
+      // Call Rust backend to start recording
+      unwrap(await commands.startRecording());
+      isRecordingRef.current = true;
+
+      // Start timer
+      startTimeRef.current = Date.now();
+
+      timerRef.current = window.setInterval(() => {
+        const elapsed = Date.now() - startTimeRef.current;
+
+        setState((prev) => ({
+          ...prev,
+          duration: elapsed,
+        }));
+
+        // Auto-stop at max duration
+        if (elapsed >= MAX_DURATION) {
+          void stopRef.current();
+        }
+      }, 50);
+
+      // Poll audio level from Rust
+      levelIntervalRef.current = window.setInterval(async () => {
+        try {
+          const level = unwrap(await commands.getRecordingLevel());
+          levelRef.current = level;
+        } catch {
+          // Ignore level polling errors
+        }
+      }, 100);
+
+      setState({
+        isRecording: true,
+        isPaused: false,
+        duration: 0,
+        audioData: null,
+        error: null,
+      });
+    } catch (err) {
+      isRecordingRef.current = false;
+      setState((prev) => ({
+        ...prev,
+        error: formatIpcError(err),
+      }));
+      console.error('Error starting recording:', err);
+    }
+  }, []);
+
+  // Unmount only: clear intervals and stop the recording if still active.
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (levelIntervalRef.current) clearInterval(levelIntervalRef.current);
+      if (isRecordingRef.current) void stopRef.current();
+    },
+    [],
+  );
 
   const pauseRecording = useCallback(() => {
     // Pause not implemented in Rust backend yet

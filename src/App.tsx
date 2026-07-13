@@ -928,7 +928,7 @@ function App() {
                 transition={{ delay: 0.3 }}
               >
                 <GrooveControls
-                  audioData={audioData || undefined}
+                  tempoEstimate={pipelineResult?.tempo ?? null}
                   onGridChange={handleGridChange}
                   onQuantizeChange={handleQuantizeChange}
                 />
