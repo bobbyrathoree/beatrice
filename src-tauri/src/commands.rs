@@ -76,6 +76,7 @@ pub async fn create_project(
 
     let project = state::create_project(
         &db,
+        project_id,
         input.name,
         input_path.to_string_lossy().to_string(),
         input_sha256,

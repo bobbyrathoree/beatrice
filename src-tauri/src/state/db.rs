@@ -65,7 +65,7 @@ pub fn init_db() -> DbResult<DbConnection> {
     Ok(DbConnection::new(conn))
 }
 
-fn run_migrations(conn: &Connection) -> DbResult<()> {
+pub(crate) fn run_migrations(conn: &Connection) -> DbResult<()> {
     // Create migrations table if it doesn't exist
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (

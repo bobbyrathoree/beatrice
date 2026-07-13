@@ -9,18 +9,39 @@ use super::models::{
     RunWithArtifacts,
 };
 
+// ==================== ROW MAPPER HELPERS ====================
+
+/// Parse a UUID column into a `Uuid`, surfacing a corrupt value as a rusqlite
+/// error instead of panicking (which would poison the connection Mutex).
+fn col_uuid(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<Uuid> {
+    let s: String = row.get(idx)?;
+    Uuid::parse_str(&s).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
+    })
+}
+
+/// Parse an RFC3339 datetime column, surfacing a corrupt value as a rusqlite
+/// error instead of panicking.
+fn col_datetime(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<chrono::DateTime<chrono::Utc>> {
+    let s: String = row.get(idx)?;
+    s.parse().map_err(|e: chrono::ParseError| {
+        rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
+    })
+}
+
 // ==================== PROJECT QUERIES ====================
 
 /// Create a new project
 pub fn create_project(
     db: &DbConnection,
+    id: Uuid,
     name: String,
     input_path: String,
     input_sha256: String,
     duration_ms: i64,
 ) -> DbResult<Project> {
     let project = Project {
-        id: Uuid::new_v4(),
+        id,
         created_at: Utc::now(),
         name,
         input_path,
@@ -55,8 +76,8 @@ pub fn get_project(db: &DbConnection, id: &Uuid) -> DbResult<Option<Project>> {
 
     let result = stmt.query_row([id.to_string()], |row| {
         Ok(Project {
-            id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
-            created_at: row.get::<_, String>(1)?.parse().unwrap(),
+            id: col_uuid(row, 0)?,
+            created_at: col_datetime(row, 1)?,
             name: row.get(2)?,
             input_path: row.get(3)?,
             input_sha256: row.get(4)?,
@@ -86,9 +107,9 @@ pub fn list_projects(db: &DbConnection) -> DbResult<Vec<ProjectSummary>> {
     let projects = stmt
         .query_map([], |row| {
             Ok(ProjectSummary {
-                id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+                id: col_uuid(row, 0)?,
                 name: row.get(1)?,
-                created_at: row.get::<_, String>(2)?.parse().unwrap(),
+                created_at: col_datetime(row, 2)?,
                 duration_ms: row.get(3)?,
                 run_count: row.get(4)?,
             })
@@ -155,9 +176,9 @@ pub fn get_run(db: &DbConnection, id: &Uuid) -> DbResult<Option<Run>> {
 
     let result = stmt.query_row([id.to_string()], |row| {
         Ok(Run {
-            id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
-            project_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap(),
-            created_at: row.get::<_, String>(2)?.parse().unwrap(),
+            id: col_uuid(row, 0)?,
+            project_id: col_uuid(row, 1)?,
+            created_at: col_datetime(row, 2)?,
             pipeline_version: row.get(3)?,
             theme: row.get(4)?,
             bpm: row.get(5)?,
@@ -187,9 +208,9 @@ pub fn list_runs_for_project(db: &DbConnection, project_id: &Uuid) -> DbResult<V
     let runs = stmt
         .query_map([project_id.to_string()], |row| {
             Ok(Run {
-                id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
-                project_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap(),
-                created_at: row.get::<_, String>(2)?.parse().unwrap(),
+                id: col_uuid(row, 0)?,
+                project_id: col_uuid(row, 1)?,
+                created_at: col_datetime(row, 2)?,
                 pipeline_version: row.get(3)?,
                 theme: row.get(4)?,
                 bpm: row.get(5)?,
@@ -262,8 +283,8 @@ pub fn get_artifacts_for_run(db: &DbConnection, run_id: &Uuid) -> DbResult<Vec<A
     let artifacts = stmt
         .query_map([run_id.to_string()], |row| {
             Ok(Artifact {
-                id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
-                run_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap(),
+                id: col_uuid(row, 0)?,
+                run_id: col_uuid(row, 1)?,
                 kind: ArtifactKind::from_string(&row.get::<_, String>(2)?),
                 path: row.get(3)?,
                 sha256: row.get(4)?,
@@ -333,9 +354,9 @@ pub fn get_calibration_profile(
 
     let result = stmt.query_row([id.to_string()], |row| {
         Ok(CalibrationProfile {
-            id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+            id: col_uuid(row, 0)?,
             name: row.get(1)?,
-            created_at: row.get::<_, String>(2)?.parse().unwrap(),
+            created_at: col_datetime(row, 2)?,
             profile_json_path: row.get(3)?,
             notes: row.get(4)?,
         })
@@ -360,9 +381,9 @@ pub fn list_calibration_profiles(db: &DbConnection) -> DbResult<Vec<CalibrationP
     let profiles = stmt
         .query_map([], |row| {
             Ok(CalibrationProfile {
-                id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+                id: col_uuid(row, 0)?,
                 name: row.get(1)?,
-                created_at: row.get::<_, String>(2)?.parse().unwrap(),
+                created_at: col_datetime(row, 2)?,
                 profile_json_path: row.get(3)?,
                 notes: row.get(4)?,
             })
@@ -406,4 +427,37 @@ pub fn delete_calibration_profile(db: &DbConnection, id: &Uuid) -> DbResult<()> 
         params![id.to_string()],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// Build an in-memory database with all migrations applied.
+    fn test_db() -> DbConnection {
+        let conn = Connection::open_in_memory().unwrap();
+        super::super::db::run_migrations(&conn).unwrap();
+        DbConnection::new(conn)
+    }
+
+    #[test]
+    fn create_project_uses_supplied_id() {
+        let db = test_db();
+        let id = Uuid::new_v4();
+        let p = create_project(&db, id, "n".into(), "/p".into(), "sha".into(), 1000).unwrap();
+        assert_eq!(p.id, id);
+    }
+
+    #[test]
+    fn corrupt_uuid_row_is_an_error_not_a_panic() {
+        let db = test_db();
+        db.lock()
+            .execute(
+                "INSERT INTO projects (id, created_at, name, input_path, input_sha256, duration_ms) VALUES ('not-a-uuid', '2026-01-01T00:00:00Z', 'x', '/x', 's', 1)",
+                [],
+            )
+            .unwrap();
+        assert!(list_projects(&db).is_err()); // was: panic + Mutex poison
+    }
 }

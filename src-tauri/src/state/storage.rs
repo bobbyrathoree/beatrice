@@ -15,9 +15,27 @@ pub enum StorageError {
     NoAppDataDir,
     #[error("Failed to serialize/deserialize JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Invalid filename: {0}")]
+    InvalidFilename(String),
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;
+
+/// Validate a filename to prevent path traversal. Only a flat, safe filename is
+/// permitted: no path separators, no `..`, and only alphanumeric plus `._-`.
+fn validated_filename(filename: &str) -> StorageResult<&str> {
+    let ok = !filename.is_empty()
+        && !filename.contains(['/', '\\'])
+        && !filename.contains("..")
+        && filename
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if ok {
+        Ok(filename)
+    } else {
+        Err(StorageError::InvalidFilename(filename.to_string()))
+    }
+}
 
 /// Get the app data directory for Beatrice
 pub fn get_app_data_dir() -> StorageResult<PathBuf> {
@@ -58,6 +76,8 @@ pub fn store_file(
     filename: &str,
     data: &[u8],
 ) -> StorageResult<(PathBuf, String)> {
+    let filename = validated_filename(filename)?;
+
     let dir = if let Some(run_id) = run_id {
         get_run_dir(project_id, run_id)?
     } else {
@@ -82,6 +102,7 @@ pub fn store_calibration_profile(
     filename: &str,
     data: &[u8],
 ) -> StorageResult<(PathBuf, String)> {
+    let filename = validated_filename(filename)?;
     let dir = get_calibration_dir()?;
     let file_path = dir.join(format!("{}_{}", profile_id, filename));
 
@@ -154,5 +175,13 @@ mod tests {
             hash,
             "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
         );
+    }
+
+    #[test]
+    fn store_file_rejects_path_traversal() {
+        let id = Uuid::new_v4();
+        assert!(store_file(&id, None, "../evil.wav", b"x").is_err());
+        assert!(store_file(&id, None, "a/b.wav", b"x").is_err());
+        assert!(store_file(&id, None, "ok.wav", b"x").is_ok());
     }
 }
