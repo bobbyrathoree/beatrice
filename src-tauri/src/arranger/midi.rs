@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use midly::{Smf, Header, Track, TrackEvent, TrackEventKind, MetaMessage, MidiMessage, Timing};
 use crate::groove::grid::Grid;
-use super::drum_lanes::{Arrangement, DrumLane};
+use super::drum_lanes::{Arrangement, ArrangedNote, DrumLane};
 
 /// MIDI export options
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +114,11 @@ fn create_lane_track<'a>(
     let mut track = Track::new();
     let mut events: Vec<(u32, TrackEventKind)> = Vec::new();
 
+    // Route this lane to the correct GM channel (spec §3.2): drums stay on 9,
+    // melodic lanes (bass/pads/arp/other) get their own channels so a DAW plays
+    // them as pitched instruments rather than percussion.
+    let channel = channel_for_lane(&lane.name);
+
     // Add track name
     if options.track_names {
         events.push((0, TrackEventKind::Meta(MetaMessage::TrackName(
@@ -121,8 +126,9 @@ fn create_lane_track<'a>(
         ))));
     }
 
-    // Add note events
-    for note in &lane.events {
+    // Add note events. Trim same-pitch overlaps first so a DAW never has to
+    // pair interleaved note-on/off events for identical keys.
+    for note in trim_overlaps(&lane.events) {
         let tick_on = (note.timestamp_ms * ticks_per_ms) as u32;
         let tick_off = ((note.timestamp_ms + note.duration_ms) * ticks_per_ms) as u32;
 
@@ -130,7 +136,7 @@ fn create_lane_track<'a>(
         events.push((
             tick_on,
             TrackEventKind::Midi {
-                channel: 9.into(), // Channel 10 (0-indexed = 9) is drums
+                channel: channel.into(),
                 message: MidiMessage::NoteOn {
                     key: note.midi_note.unwrap_or(lane.midi_note).into(),
                     vel: note.velocity.into(),
@@ -142,7 +148,7 @@ fn create_lane_track<'a>(
         events.push((
             tick_off,
             TrackEventKind::Midi {
-                channel: 9.into(),
+                channel: channel.into(),
                 message: MidiMessage::NoteOff {
                     key: note.midi_note.unwrap_or(lane.midi_note).into(),
                     vel: 0.into(),
@@ -174,6 +180,53 @@ fn create_lane_track<'a>(
     });
 
     Ok(track)
+}
+
+/// Map a lane name to its General MIDI channel (spec §3.2 channel map).
+///
+/// Drums stay on channel 9 (GM percussion, 0-indexed). Melodic lanes get
+/// dedicated channels so a DAW instantiates a pitched instrument for them
+/// instead of treating them as percussion:
+/// BASS=0, PADS=1, ARP=2, any other melodic lane=3.
+fn channel_for_lane(name: &str) -> u8 {
+    match name {
+        n if n.to_uppercase().starts_with("DRUMS") => 9,
+        "BASS" => 0,
+        "PADS" => 1,
+        "ARP" => 2,
+        _ => 3,
+    }
+}
+
+/// Trim same-pitch overlaps so no two notes of the same key sound at once.
+///
+/// If two notes share a pitch and overlap in time, the earlier note is cut to
+/// end exactly at the later note's onset. This prevents interleaved
+/// note-on/off pairs for identical keys, which DAWs mis-pair (leading to stuck
+/// or dropped notes). Notes at different pitches are left untouched so chords
+/// and pads still sustain fully.
+fn trim_overlaps(events: &[ArrangedNote]) -> Vec<ArrangedNote> {
+    let mut out: Vec<ArrangedNote> = events.to_vec();
+    out.sort_by(|a, b| {
+        a.timestamp_ms
+            .partial_cmp(&b.timestamp_ms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for i in 0..out.len() {
+        let pitch_i = out[i].midi_note;
+        let on_i = out[i].timestamp_ms;
+        let off_i = out[i].timestamp_ms + out[i].duration_ms;
+        for j in (i + 1)..out.len() {
+            if out[j].timestamp_ms >= off_i {
+                break;
+            }
+            if out[j].midi_note == pitch_i && out[j].timestamp_ms > on_i {
+                out[i].duration_ms = out[j].timestamp_ms - on_i;
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// Calculate ticks per millisecond
@@ -403,5 +456,134 @@ mod tests {
 
         // Should have: track name, 2 note-ons, 2 note-offs, end of track = 6 events
         assert!(track.len() >= 5);
+    }
+
+    // --- Task 3: channel routing + overlap trimming ---
+
+    /// Standard grid used across the channel-routing tests.
+    fn test_grid() -> Grid {
+        Grid::new(120.0, TimeSignature::FourFour, GridDivision::Quarter, 4)
+    }
+
+    /// Arrangement with one DRUMS_KICK note (percussion) and one BASS note (melodic).
+    fn two_lane_arrangement() -> Arrangement {
+        let grid = test_grid();
+        let mut arrangement = Arrangement::new(
+            ArrangementTemplate::SynthwaveStraight,
+            grid.total_duration_ms(),
+            grid.bar_count,
+        );
+
+        let mut kick_lane = DrumLane::new("DRUMS_KICK", MIDI_KICK);
+        kick_lane.add_note(ArrangedNote::new(0.0, 100.0, 100, None, None));
+        arrangement.add_drum_lane(kick_lane);
+
+        let mut bass_lane = DrumLane::new("BASS", 36);
+        bass_lane.add_note(ArrangedNote::new(0.0, 200.0, 90, Some(48), None));
+        arrangement.bass_lane = Some(bass_lane);
+
+        arrangement
+    }
+
+    /// Collect (track_name, channel) for every NoteOn (vel > 0) in the file.
+    fn collect_note_on_channels(smf: &Smf) -> Vec<(String, u8)> {
+        let mut result = Vec::new();
+        for track in &smf.tracks {
+            // Find this track's name (if any)
+            let mut name = String::new();
+            for ev in track.iter() {
+                if let TrackEventKind::Meta(MetaMessage::TrackName(bytes)) = &ev.kind {
+                    name = String::from_utf8_lossy(bytes).to_string();
+                    break;
+                }
+            }
+            for ev in track.iter() {
+                if let TrackEventKind::Midi {
+                    channel,
+                    message: MidiMessage::NoteOn { vel, .. },
+                } = &ev.kind
+                {
+                    if vel.as_int() > 0 {
+                        result.push((name.clone(), channel.as_int()));
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn melodic_lanes_use_melodic_channels() {
+        let arr = two_lane_arrangement();
+        let bytes = export_midi(&arr, &test_grid(), &MidiExportOptions::default()).unwrap();
+        let smf = Smf::parse(&bytes).unwrap();
+        let channels: Vec<(String, u8)> = collect_note_on_channels(&smf);
+        assert!(channels.iter().any(|(n, c)| n == "DRUMS_KICK" && *c == 9));
+        assert!(channels.iter().any(|(n, c)| n == "BASS" && *c == 0));
+    }
+
+    #[test]
+    fn overlapping_same_pitch_notes_are_trimmed() {
+        let mut lane = DrumLane::new("PADS", 48);
+        lane.add_note(ArrangedNote::new(0.0, 1000.0, 80, Some(60), None));
+        lane.add_note(ArrangedNote::new(500.0, 1000.0, 80, Some(60), None)); // overlaps prev
+        let trimmed = trim_overlaps(&lane.events);
+        assert!((trimmed[0].duration_ms - 500.0).abs() < 1e-6); // first note cut at second's onset
+    }
+
+    #[test]
+    fn channel_for_lane_follows_spec_map() {
+        assert_eq!(channel_for_lane("DRUMS_KICK"), 9);
+        assert_eq!(channel_for_lane("DRUMS_SNARE"), 9);
+        assert_eq!(channel_for_lane("BASS"), 0);
+        assert_eq!(channel_for_lane("PADS"), 1);
+        assert_eq!(channel_for_lane("ARP"), 2);
+        // Anything else is generic melodic
+        assert_eq!(channel_for_lane("LEAD"), 3);
+    }
+
+    #[test]
+    fn different_pitch_overlaps_are_not_trimmed() {
+        let mut lane = DrumLane::new("PADS", 48);
+        lane.add_note(ArrangedNote::new(0.0, 1000.0, 80, Some(60), None));
+        lane.add_note(ArrangedNote::new(500.0, 1000.0, 80, Some(64), None)); // different pitch
+        let trimmed = trim_overlaps(&lane.events);
+        // Non-overlapping pitches keep their full duration (chords must sustain)
+        assert!((trimmed[0].duration_ms - 1000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn golden_file_is_daw_correct() {
+        let arr = two_lane_arrangement();
+        let grid = test_grid();
+        let options = MidiExportOptions::default();
+        let bytes = export_midi(&arr, &grid, &options).unwrap();
+
+        // Golden artifact for optional human DAW verification.
+        std::fs::write("/tmp/beatrice-check.mid", &bytes).unwrap();
+
+        let smf = Smf::parse(&bytes).unwrap();
+
+        // Format 1 (parallel tracks)
+        assert_eq!(smf.header.format, midly::Format::Parallel);
+
+        // PPQ timing preserved
+        match smf.header.timing {
+            Timing::Metrical(ppq) => assert_eq!(ppq.as_int(), 480),
+            _ => panic!("Expected metrical (PPQ) timing"),
+        }
+
+        // Per-track name + channel routing
+        let channels = collect_note_on_channels(&smf);
+        assert!(
+            channels.iter().any(|(n, c)| n == "DRUMS_KICK" && *c == 9),
+            "drums must stay on percussion channel 9, got {:?}",
+            channels
+        );
+        assert!(
+            channels.iter().any(|(n, c)| n == "BASS" && *c == 0),
+            "bass must route to melodic channel 0, got {:?}",
+            channels
+        );
     }
 }
