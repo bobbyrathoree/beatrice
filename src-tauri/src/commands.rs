@@ -13,7 +13,7 @@ use crate::state::{
     RunStatus, RunWithArtifacts,
 };
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct CommandError {
     message: String,
 }
@@ -29,6 +29,7 @@ impl<E: std::fmt::Display> From<E> for CommandError {
 type CommandResult<T> = Result<T, CommandError>;
 
 #[tauri::command]
+#[specta::specta]
 pub fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Beatrice.", name)
 }
@@ -91,6 +92,7 @@ pub fn get_project(db: State<'_, DbConnection>, id: String) -> CommandResult<Opt
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_projects(db: State<'_, DbConnection>) -> CommandResult<Vec<ProjectSummary>> {
     state::list_projects(&db).map_err(|e| CommandError::from(e))
 }

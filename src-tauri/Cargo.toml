@@ -17,13 +17,27 @@ tauri-build = { version = "2.5", features = [] }
 
 [dependencies]
 # Tauri
-tauri = { version = "2.9", features = [] }
+tauri = { version = "2.9", features = ["specta"] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
+
+# Typed IPC bindings (tauri-specta)
+# NOTE (Task 0 spike): the plan called for specta/tauri-specta =2.0.0-rc.25 +
+# specta-typescript 0.0.12, but specta rc.24/rc.25 (edition 2024) use the
+# still-unstable `std::fmt::from_fn` (`debug_closure_helpers`, rust-lang #117729)
+# and fail to compile on the pinned Rust 1.77.2 floor / the installed 1.91.1
+# stable. Additionally tauri 2.9.5's own `specta` feature emits
+# `#[specta(rename=...)]` on a container, which specta rc.25 rejects outright.
+# The highest specta that compiles on stable is rc.23; tauri-specta rc.21 pins
+# specta rc.22 and works with tauri 2.9's `specta` feature. This is the verified
+# working combo — see docs plan Task 1/2 "OBSERVED GROUND TRUTH".
+specta = { version = "=2.0.0-rc.22", features = ["derive", "uuid", "chrono"] }
+tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
+specta-typescript = "=0.0.9"
 
 # Audio
 hound = "3.5"                      # WAV read/write

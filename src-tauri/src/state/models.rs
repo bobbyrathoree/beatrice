@@ -106,7 +106,7 @@ pub struct CalibrationProfile {
     pub notes: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ProjectSummary {
     pub id: Uuid,
     pub name: String,
