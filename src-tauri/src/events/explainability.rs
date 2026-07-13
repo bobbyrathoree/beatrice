@@ -50,6 +50,24 @@ pub struct EventDecision {
     pub reasoning: String,
 }
 
+/// Describe how a hit's timing was adjusted during quantization.
+///
+/// `snap_delta_ms = quantized_timestamp - original_timestamp`. A positive delta
+/// means the note was pulled *later* to reach the grid, which means the user
+/// actually hit *early*. A negative delta means the note was pulled *earlier*,
+/// so the user hit *late*.
+pub fn timing_description(snap_delta_ms: f64) -> String {
+    if snap_delta_ms.abs() < 1.0 {
+        "perfect timing".to_string()
+    } else if snap_delta_ms > 0.0 {
+        // Note was pulled later to reach the grid => the user hit early.
+        format!("early by {:.1}ms", snap_delta_ms)
+    } else {
+        // Note was pulled earlier to reach the grid => the user hit late.
+        format!("late by {:.1}ms", snap_delta_ms.abs())
+    }
+}
+
 impl EventDecision {
     /// Create a decision object from pipeline data
     pub fn from_pipeline_data(
@@ -71,13 +89,7 @@ impl EventDecision {
         let (q_ts, delta, grid_pos) = if let Some(q) = quantized {
             let pos = format!("{}.{}.{}", q.grid_position.bar + 1, q.grid_position.beat + 1, q.grid_position.subdivision + 1);
             
-            let timing_desc = if q.snap_delta_ms.abs() < 1.0 {
-                "perfect timing".to_string()
-            } else if q.snap_delta_ms > 0.0 {
-                format!("late by {:.1}ms", q.snap_delta_ms)
-            } else {
-                format!("early by {:.1}ms", q.snap_delta_ms.abs())
-            };
+            let timing_desc = timing_description(q.snap_delta_ms);
 
             reason_parts.push(format!(
                 "Quantized to grid position {} ({}, adjusted {:.1}ms).",
@@ -131,5 +143,24 @@ impl EventDecision {
             assigned_notes: notes,
             reasoning: reason_parts.join(" "),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timing_label_matches_delta_sign() {
+        // snap_delta_ms = quantized - original; a positive delta means the note
+        // was pulled later, which means the user hit EARLY.
+        assert!(timing_description(25.0).contains("early")); // moved +25ms later => user was early
+        assert!(timing_description(-25.0).contains("late")); // moved -25ms earlier => user was late
+    }
+
+    #[test]
+    fn timing_label_near_zero_is_perfect() {
+        assert_eq!(timing_description(0.0), "perfect timing");
+        assert_eq!(timing_description(0.5), "perfect timing");
     }
 }

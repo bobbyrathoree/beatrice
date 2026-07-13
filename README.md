@@ -16,7 +16,7 @@ Beatrice is a desktop app that transforms beatbox performances into harmonically
 4. **Events are quantized** to a musical grid with swing and feel controls
 5. **A harmonic arrangement is generated** — bass walks chord progressions, pads play triads, arps follow your rhythm
 6. **Song Mode** turns your 4-bar loop into a 16-bar evolving track with intro, build, drop, and outro
-7. **Export as MIDI** for use in any DAW, or preview in-app with layered WebAudio synthesis
+7. **Export as MIDI** (bass, pads, arp, and drums each on their own channel) or **export WAV** — both rendered from the same WebAudio engine you hear in-app
 
 ## Screenshots
 
@@ -38,7 +38,7 @@ Tempo (auto-detected), time signature, grid division, feel (straight/swing/halft
 
 ### Export
 ![Export](docs/screenshots/05-export.png)
-Export MIDI for any DAW (Ableton, Logic, FL Studio) or preview audio with current theme settings.
+Export MIDI for any DAW (Ableton, Logic, FL Studio) or export a WAV. The MIDI file routes each part to its own channel — bass on channel 0, pads on 1, arp on 2, and drums on the GM percussion channel 9 — so it loads cleanly with the right instruments. WAV export is rendered from the same in-app WebAudio engine (via an `OfflineAudioContext`), so the file matches the preview exactly.
 
 ### Explainability — Event Decision Card
 ![Decision Card](docs/screenshots/06-decision-card.png)
@@ -73,7 +73,7 @@ Themes define the harmonic personality of the output:
 | Theme | Key | Progression | Character |
 |-------|-----|------------|-----------|
 | **Blade Runner** | D minor | Dm → Bb → F → C | Dark, atmospheric, Vangelis-inspired |
-| **Stranger Things** | E minor | Em → C → G → D | Retro 80s synth |
+| **Stranger Things** | C minor | Cm → Bb → Ab → Bb | Retro 80s synth |
 
 The bass line follows the chord progression with root-fifth alternation. Pad chords resolve to the active triad. Arpeggios can be driven by your hi-hat rhythm (ArpDrive mode).
 
@@ -121,11 +121,20 @@ cargo run --bin analyze -- path/to/your/beatbox.wav
 
 ### Run tests
 ```bash
-cd src-tauri
-cargo test    # 121+ unit tests + 8 integration tests
+# Rust: 107 unit tests + 8 integration tests
+# The integration tests read fixtures from test-audio/, so generate them first.
+node scripts/generate-test-audio.mjs
+cd src-tauri && cargo test
+
+# Frontend: 9 Vitest tests + type check
+npm test
+npx tsc --noEmit
 ```
 
 ### Generate deterministic test audio
+The `test-audio/` directory is not committed — it is generated on demand. The
+script writes deterministic WAV fixtures (kick, hihat, snare, hum, an 8-bar
+progression, and the composite `test-pattern.wav` the integration tests read).
 ```bash
 node scripts/generate-test-audio.mjs
 ```
@@ -154,7 +163,6 @@ src-tauri/src/                # Rust backend
                               # bass, triadic pads, rhythmic arp puppeteering)
   themes/                     # Scale families, chord progressions, bass/arp
                               # patterns, FX profiles
-  render/                     # Synthesis engine (placeholder — WebAudio active)
   state/                      # SQLite persistence, file storage, JSONL traces
 ```
 

@@ -369,17 +369,27 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   // --- Themes (match Rust ThemeSummary / Theme structs) ---
+  // Values mirror src-tauri/src/themes/{blade_runner,stranger_things}.rs exactly.
   list_themes: () => [
-    { name: 'BLADE RUNNER', description: 'Dark, moody synth theme', bpm_range: [80, 120], root_note: 60, scale_family: 'NaturalMinor' },
-    { name: 'STRANGER THINGS', description: 'Retro 80s synth theme', bpm_range: [100, 140], root_note: 64, scale_family: 'NaturalMinor' },
+    { name: 'BLADE RUNNER', description: 'Vangelis-inspired pads, brass stabs, gated reverb. Melancholic and atmospheric.', bpm_range: [80, 100], root_note: 62, scale_family: 'NaturalMinor' },
+    { name: 'STRANGER THINGS', description: 'Synthwave horror with arpeggios, pulsing bass, and dark delay. Retro and unsettling.', bpm_range: [100, 120], root_note: 60, scale_family: 'NaturalMinor' },
   ],
 
   get_theme: (a) => {
     requireKeys(a, ['name']);
+    const name = (a.name || 'BLADE RUNNER').toUpperCase();
+    if (name === 'STRANGER THINGS') {
+      return {
+        name: 'STRANGER THINGS', bpm_range: [100, 120], root_note: 60, scale_family: 'NaturalMinor',
+        chord_progression: { chords: ['Im', 'VII', 'VI', 'VII'], bars_per_chord: 2 },
+        bass_pattern: 'OffbeatEighths', arp_pattern: 'Up158', arp_octave_range: [0, 2],
+        drum_palette: 'SynthwaveDrums', fx_profile: 'DarkDelay', synth_stab_velocity: 90, pad_sustain: false,
+      };
+    }
     return {
-      name: a.name || 'BLADE RUNNER', bpm_range: [80, 120], root_note: 60, scale_family: 'NaturalMinor',
+      name: 'BLADE RUNNER', bpm_range: [80, 100], root_note: 62, scale_family: 'NaturalMinor',
       chord_progression: { chords: ['Im', 'VI', 'III', 'VII'], bars_per_chord: 2 },
-      bass_pattern: 'Root', arp_pattern: 'Up158', arp_octave_range: [3, 5],
+      bass_pattern: 'RootFifth', arp_pattern: 'Up158', arp_octave_range: [-1, 1],
       drum_palette: 'SynthwaveDrums', fx_profile: 'GatedReverb', synth_stab_velocity: 100, pad_sustain: true,
     };
   },

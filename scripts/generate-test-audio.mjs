@@ -155,6 +155,27 @@ function generate8BarProgression() {
   return samples;
 }
 
+/**
+ * Composite pattern used by the integration tests (pipeline_integration.rs).
+ * Four hits at 500ms spacing (~120 BPM), one of each transient class:
+ *   kick@0ms (BilabialPlosive), hihat@500ms (HihatNoise),
+ *   snare@1000ms (Click), kick@1500ms (BilabialPlosive).
+ * 2.5s, 44.1kHz, mono.
+ */
+function generatePattern() {
+  const totalSec = 2.5;
+  const n = Math.floor(SAMPLE_RATE * totalSec);
+  const samples = new Float64Array(n);
+
+  addHit(samples, 0, generateKick, 0.2);
+  addHit(samples, 500, generateHihat, 0.1);
+  addHit(samples, 1000, generateSnare, 0.1);
+  addHit(samples, 1500, generateKick, 0.2);
+
+  normalize(samples);
+  return samples;
+}
+
 function addHit(buffer, timeMs, gen, dur) {
   const hitSamples = gen(dur);
   const startIdx = Math.floor(timeMs * SAMPLE_RATE / 1000);
@@ -178,4 +199,5 @@ writeWav('test-hihat.wav', generateHihat(0.1));
 writeWav('test-snare.wav', generateSnare(0.1));
 writeWav('test-hum.wav', generateHum(1.0));
 writeWav('test-8bar-progression.wav', generate8BarProgression());
+writeWav('test-pattern.wav', generatePattern());
 console.log('Done.');
