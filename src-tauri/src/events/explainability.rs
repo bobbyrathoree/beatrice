@@ -9,7 +9,7 @@ use crate::events::{Event, EventClass, EventFeatures};
 use crate::groove::quantize::QuantizedEvent;
 
 /// A simplified representation of a note assigned to an instrument lane
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AssignedNote {
     /// Name of the lane (e.g., "KICK", "SNARE")
     pub lane_name: String,
@@ -26,7 +26,7 @@ pub struct AssignedNote {
 
 /// Complete decision information for a single event
 /// showing how it moved through the pipeline
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct EventDecision {
     /// Original event ID
     pub event_id: Uuid,

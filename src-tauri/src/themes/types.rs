@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Musical scale families
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub enum ScaleFamily {
     MinorPentatonic,
     NaturalMinor,
@@ -14,7 +14,7 @@ pub enum ScaleFamily {
 }
 
 /// Chord types by scale degree
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub enum ChordType {
     I,    // Major I
     II,   // Major II
@@ -33,14 +33,14 @@ pub enum ChordType {
 }
 
 /// Chord progression structure
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ChordProgression {
     pub chords: Vec<ChordType>,
     pub bars_per_chord: u32,
 }
 
 /// Arpeggiator patterns
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub enum ArpPattern {
     Up158,       // 1-5-8 ascending
     Down851,     // 8-5-1 descending
@@ -49,7 +49,7 @@ pub enum ArpPattern {
 }
 
 /// Bass line patterns
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub enum BassPattern {
     Root,           // Just root notes
     RootFifth,      // Root and fifth
@@ -58,7 +58,7 @@ pub enum BassPattern {
 }
 
 /// Drum kit palettes
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub enum DrumPalette {
     SynthwaveDrums, // 80s electronic
     AcousticKit,    // Natural drums
@@ -66,7 +66,7 @@ pub enum DrumPalette {
 }
 
 /// Effects profiles
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub enum FxProfile {
     GatedReverb, // 80s gated reverb
     WideChorus,  // Lush chorus
@@ -75,7 +75,7 @@ pub enum FxProfile {
 }
 
 /// Complete theme definition
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct Theme {
     pub name: String,
     pub bpm_range: (u32, u32),           // Suggested BPM range
@@ -92,7 +92,7 @@ pub struct Theme {
 }
 
 /// Theme summary for UI display
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThemeSummary {
     pub name: String,
     pub description: String,

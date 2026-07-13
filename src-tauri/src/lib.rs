@@ -13,26 +13,65 @@ mod render;
 mod state;
 pub mod themes;
 
-/// tauri-specta builder holding the specta-annotated command set.
+/// tauri-specta builder holding the full specta-annotated command set.
 ///
-/// SPIKE (Task 0): only `greet` and `list_projects` are annotated so far, so
-/// this builder is used exclusively by the `export_bindings` test to generate
-/// `src/bindings.ts`. The runtime `invoke_handler` below still uses the
-/// hand-written `tauri::generate_handler!`. Task 1 extends `collect_commands![]`
-/// to every command and swaps the runtime handler over to this builder.
+/// This is the single source of truth for the IPC surface: both the runtime
+/// `invoke_handler` (see `run()`) and the `export_bindings` test derive from
+/// it, so `src/bindings.ts` can never drift from the commands actually wired
+/// into the app. Add a command here and it is exported and callable in one step.
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
         commands::greet,
+        commands::create_project,
+        commands::get_project,
         commands::list_projects,
+        commands::create_run,
+        commands::get_run,
+        commands::list_runs_for_project,
+        commands::get_run_with_artifacts,
+        commands::update_run_status,
+        commands::create_artifact,
+        commands::list_calibration_profiles,
+        commands::create_calibration_profile,
+        commands::get_calibration_profile,
+        commands::update_calibration_profile,
+        commands::delete_calibration_profile,
+        commands::detect_onsets,
+        commands::detect_events,
+        commands::extract_features,
+        commands::estimate_tempo,
+        commands::quantize_events_command,
+        commands::arrange_events_command,
+        commands::export_midi_command,
+        commands::list_themes,
+        commands::get_theme,
+        commands::list_theme_names,
+        commands::render_preview,
+        commands::start_recording,
+        commands::stop_recording,
+        commands::is_recording,
+        commands::get_recording_level,
+        commands::save_event_decisions,
+        commands::get_event_decisions,
     ])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let builder = specta_builder();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .setup(|app| {
+        // tauri-specta's generated invoke handler. `invoke_handler(&self)`
+        // returns an owned `'static` closure, so `builder` stays available to
+        // move into the setup closure below for `mount_events`.
+        .invoke_handler(builder.invoke_handler())
+        .setup(move |app| {
+            // Register tauri-specta event types (no-op today; keeps the router
+            // authoritative if events are added later).
+            builder.mount_events(app);
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -58,40 +97,6 @@ pub fn run() {
             log::info!("Beatrice initialized successfully");
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::greet,
-            commands::create_project,
-            commands::get_project,
-            commands::list_projects,
-            commands::create_run,
-            commands::get_run,
-            commands::list_runs_for_project,
-            commands::get_run_with_artifacts,
-            commands::update_run_status,
-            commands::create_artifact,
-            commands::list_calibration_profiles,
-            commands::create_calibration_profile,
-            commands::get_calibration_profile,
-            commands::update_calibration_profile,
-            commands::delete_calibration_profile,
-            commands::detect_onsets,
-            commands::detect_events,
-            commands::extract_features,
-            commands::estimate_tempo,
-            commands::quantize_events_command,
-            commands::arrange_events_command,
-            commands::export_midi_command,
-            commands::list_themes,
-            commands::get_theme,
-            commands::list_theme_names,
-            commands::render_preview,
-            commands::start_recording,
-            commands::stop_recording,
-            commands::is_recording,
-            commands::get_recording_level,
-            commands::save_event_decisions,
-            commands::get_event_decisions,
-        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

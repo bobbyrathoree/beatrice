@@ -73,7 +73,7 @@ pub enum GrooveFeel {
 }
 
 /// Grid position - describes location in musical time
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct GridPosition {
     /// Bar number (0-indexed)
     pub bar: u32,

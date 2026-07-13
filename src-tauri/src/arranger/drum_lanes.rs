@@ -17,7 +17,7 @@ pub const MIDI_CLOSED_HIHAT: u8 = 42; // F#1
 pub const MIDI_OPEN_HIHAT: u8 = 46;  // A#1
 
 /// A drum/instrument lane containing arranged notes
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DrumLane {
     /// Lane name (e.g., "KICK", "SNARE", "HIHAT")
     pub name: String,
@@ -55,7 +55,7 @@ impl DrumLane {
 }
 
 /// An arranged note with timing and MIDI parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ArrangedNote {
     /// Timestamp in milliseconds
     pub timestamp_ms: f64,
@@ -104,7 +104,7 @@ impl ArrangedNote {
 }
 
 /// Complete arrangement with all lanes
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Arrangement {
     /// Drum lanes (kick, snare, hihat, etc.)
     pub drum_lanes: Vec<DrumLane>,

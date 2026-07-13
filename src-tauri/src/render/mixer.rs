@@ -6,7 +6,7 @@ use crate::arranger::Arrangement;
 use crate::themes::Theme;
 
 /// Mixer settings for final audio rendering
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct MixerSettings {
     pub kick_volume: f32,
     pub snare_volume: f32,

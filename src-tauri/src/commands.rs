@@ -36,13 +36,14 @@ pub fn greet(name: &str) -> String {
 
 // ==================== PROJECT COMMANDS ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct CreateProjectInput {
     pub name: String,
     pub input_data: Vec<u8>,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_project(
     db: State<'_, DbConnection>,
     input: CreateProjectInput,
@@ -86,6 +87,7 @@ pub async fn create_project(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_project(db: State<'_, DbConnection>, id: String) -> CommandResult<Option<Project>> {
     let uuid = Uuid::parse_str(&id).map_err(|e| CommandError::from(e))?;
     state::get_project(&db, &uuid).map_err(|e| CommandError::from(e))
@@ -99,7 +101,7 @@ pub fn list_projects(db: State<'_, DbConnection>) -> CommandResult<Vec<ProjectSu
 
 // ==================== RUN COMMANDS ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct CreateRunInput {
     pub project_id: String,
     pub pipeline_version: String,
@@ -111,6 +113,7 @@ pub struct CreateRunInput {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn create_run(db: State<'_, DbConnection>, input: CreateRunInput) -> CommandResult<Run> {
     let project_id = Uuid::parse_str(&input.project_id).map_err(|e| CommandError::from(e))?;
 
@@ -130,12 +133,14 @@ pub fn create_run(db: State<'_, DbConnection>, input: CreateRunInput) -> Command
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_run(db: State<'_, DbConnection>, id: String) -> CommandResult<Option<Run>> {
     let uuid = Uuid::parse_str(&id).map_err(|e| CommandError::from(e))?;
     state::get_run(&db, &uuid).map_err(|e| CommandError::from(e))
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_runs_for_project(
     db: State<'_, DbConnection>,
     project_id: String,
@@ -145,6 +150,7 @@ pub fn list_runs_for_project(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_run_with_artifacts(
     db: State<'_, DbConnection>,
     run_id: String,
@@ -153,13 +159,14 @@ pub fn get_run_with_artifacts(
     state::queries::get_run_with_artifacts(&db, &uuid).map_err(|e| CommandError::from(e))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct UpdateRunStatusInput {
     pub run_id: String,
     pub status: String,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn update_run_status(
     db: State<'_, DbConnection>,
     input: UpdateRunStatusInput,
@@ -171,7 +178,7 @@ pub fn update_run_status(
 
 // ==================== ARTIFACT COMMANDS ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct CreateArtifactInput {
     pub run_id: String,
     pub kind: String,
@@ -180,6 +187,7 @@ pub struct CreateArtifactInput {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_artifact(
     db: State<'_, DbConnection>,
     input: CreateArtifactInput,
@@ -217,7 +225,7 @@ pub async fn create_artifact(
 
 // ==================== CALIBRATION PROFILE COMMANDS ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct CreateCalibrationProfileInput {
     pub name: String,
     pub profile_data: Vec<u8>,
@@ -225,6 +233,7 @@ pub struct CreateCalibrationProfileInput {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_calibration_profile(
     db: State<'_, DbConnection>,
     input: CreateCalibrationProfileInput,
@@ -251,6 +260,7 @@ pub async fn create_calibration_profile(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_calibration_profile(
     db: State<'_, DbConnection>,
     id: String,
@@ -260,13 +270,14 @@ pub fn get_calibration_profile(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_calibration_profiles(
     db: State<'_, DbConnection>,
 ) -> CommandResult<Vec<CalibrationProfile>> {
     state::list_calibration_profiles(&db).map_err(|e| CommandError::from(e))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct UpdateCalibrationProfileInput {
     pub id: String,
     pub name: Option<String>,
@@ -274,6 +285,7 @@ pub struct UpdateCalibrationProfileInput {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn update_calibration_profile(
     db: State<'_, DbConnection>,
     input: UpdateCalibrationProfileInput,
@@ -284,6 +296,7 @@ pub fn update_calibration_profile(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn delete_calibration_profile(
     db: State<'_, DbConnection>,
     id: String,
@@ -294,19 +307,19 @@ pub fn delete_calibration_profile(
 
 // ==================== EVENT DETECTION COMMANDS ====================
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct OnsetDetectionResult {
     pub onsets: Vec<OnsetData>,
     pub total_count: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct OnsetData {
     pub timestamp_ms: f64,
     pub strength: f32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct DetectOnsetsInput {
     pub audio_data: Vec<u8>,
     pub window_size: Option<usize>,
@@ -316,6 +329,7 @@ pub struct DetectOnsetsInput {
 
 /// Detect onsets in audio data
 #[tauri::command]
+#[specta::specta]
 pub fn detect_onsets(input: DetectOnsetsInput) -> CommandResult<OnsetDetectionResult> {
     // Ingest audio
     let audio = audio::ingest_wav(&input.audio_data).map_err(|e| CommandError {
@@ -351,13 +365,13 @@ pub fn detect_onsets(input: DetectOnsetsInput) -> CommandResult<OnsetDetectionRe
     })
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct EventDetectionResult {
     pub events: Vec<EventData>,
     pub total_count: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 pub struct EventData {
     pub id: String,
     pub timestamp_ms: f64,
@@ -367,7 +381,7 @@ pub struct EventData {
     pub features: EventFeatures,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct DetectEventsInput {
     pub file_path: String,
     pub run_id: Option<String>,
@@ -377,6 +391,7 @@ pub struct DetectEventsInput {
 
 /// Detect and classify events in audio data
 #[tauri::command]
+#[specta::specta]
 pub async fn detect_events(
     db: State<'_, DbConnection>,
     input: DetectEventsInput,
@@ -558,7 +573,7 @@ pub async fn detect_events(
     })
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct ExtractFeaturesInput {
     pub audio_data: Vec<u8>,
     pub start_ms: f64,
@@ -567,6 +582,7 @@ pub struct ExtractFeaturesInput {
 
 /// Extract features from a specific audio segment
 #[tauri::command]
+#[specta::specta]
 pub fn extract_features(input: ExtractFeaturesInput) -> CommandResult<EventFeatures> {
     let audio = audio::ingest_wav(&input.audio_data).map_err(|e| CommandError {
         message: format!("Failed to ingest audio: {}", e),
@@ -579,13 +595,14 @@ pub fn extract_features(input: ExtractFeaturesInput) -> CommandResult<EventFeatu
 
 // ==================== GROOVE ENGINE COMMANDS ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct EstimateTempoInput {
     pub file_path: String,
 }
 
 /// Estimate tempo (BPM) from audio data
 #[tauri::command]
+#[specta::specta]
 pub fn estimate_tempo(input: EstimateTempoInput) -> CommandResult<TempoEstimate> {
     // Read audio from disk
     let file_bytes = std::fs::read(&input.file_path).map_err(|e| CommandError {
@@ -605,7 +622,7 @@ pub fn estimate_tempo(input: EstimateTempoInput) -> CommandResult<TempoEstimate>
     Ok(tempo_estimate)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct QuantizeEventsInput {
     pub events: Vec<EventData>,
     pub bpm: f64,
@@ -620,6 +637,7 @@ pub struct QuantizeEventsInput {
 
 /// Quantize events to a musical grid
 #[tauri::command]
+#[specta::specta]
 pub fn quantize_events_command(input: QuantizeEventsInput) -> CommandResult<Vec<QuantizedEvent>> {
     // Parse time signature
     let time_signature = match input.time_signature.as_str() {
@@ -687,7 +705,7 @@ pub fn quantize_events_command(input: QuantizeEventsInput) -> CommandResult<Vec<
 
 // ==================== ARRANGER COMMANDS ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct ArrangeEventsInput {
     pub events: Vec<QuantizedEvent>,
     pub template: String,
@@ -703,6 +721,7 @@ pub struct ArrangeEventsInput {
 
 /// Arrange quantized events into a musical arrangement
 #[tauri::command]
+#[specta::specta]
 pub fn arrange_events_command(input: ArrangeEventsInput) -> CommandResult<Arrangement> {
     // Parse template
     let template = ArrangementTemplate::from_string(&input.template);
@@ -765,7 +784,7 @@ pub fn arrange_events_command(input: ArrangeEventsInput) -> CommandResult<Arrang
     Ok(arrangement)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct ExportMidiInput {
     pub arrangement: Arrangement,
     pub bpm: f64,
@@ -782,6 +801,7 @@ pub struct ExportMidiInput {
 
 /// Export arrangement as MIDI file bytes
 #[tauri::command]
+#[specta::specta]
 pub fn export_midi_command(input: ExportMidiInput) -> CommandResult<Vec<u8>> {
     // Parse time signature
     let time_signature = match input.time_signature.as_str() {
@@ -843,7 +863,7 @@ pub fn export_midi_command(input: ExportMidiInput) -> CommandResult<Vec<u8>> {
 
 // ==================== EXPLAINABILITY COMMANDS ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct SaveEventDecisionsInput {
     pub run_id: String,
     pub events: Vec<EventData>,
@@ -852,6 +872,7 @@ pub struct SaveEventDecisionsInput {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_event_decisions(
     db: State<'_, DbConnection>,
     input: SaveEventDecisionsInput,
@@ -906,6 +927,7 @@ pub fn save_event_decisions(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_event_decisions(
     db: State<'_, DbConnection>,
     run_id: String,
@@ -929,25 +951,28 @@ pub fn get_event_decisions(
 
 /// List all available themes with summaries
 #[tauri::command]
+#[specta::specta]
 pub fn list_themes() -> CommandResult<Vec<crate::themes::ThemeSummary>> {
     Ok(crate::themes::list_themes())
 }
 
 /// Get a specific theme by name
 #[tauri::command]
+#[specta::specta]
 pub fn get_theme(name: String) -> CommandResult<Option<crate::themes::Theme>> {
     Ok(crate::themes::get_theme(&name))
 }
 
 /// Get all theme names
 #[tauri::command]
+#[specta::specta]
 pub fn list_theme_names() -> CommandResult<Vec<String>> {
     Ok(crate::themes::list_theme_names())
 }
 
 // ==================== RENDER COMMANDS ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct RenderPreviewInput {
     pub arrangement: Arrangement,
     pub theme_name: String,
@@ -961,6 +986,7 @@ pub struct RenderPreviewInput {
 /// Note: This is a placeholder implementation that returns silent audio.
 /// Full audio synthesis will be implemented in a future update.
 #[tauri::command]
+#[specta::specta]
 pub async fn render_preview(
     input: RenderPreviewInput,
 ) -> CommandResult<Vec<u8>> {
@@ -1035,6 +1061,7 @@ impl Default for RecorderState {
 
 /// Start audio recording from the default input device
 #[tauri::command]
+#[specta::specta]
 pub fn start_recording(recorder: State<'_, RecorderState>) -> CommandResult<()> {
     recorder.0.start().map_err(|e| CommandError {
         message: format!("Failed to start recording: {}", e),
@@ -1046,6 +1073,7 @@ pub fn start_recording(recorder: State<'_, RecorderState>) -> CommandResult<()> 
 
 /// Stop recording and return the audio data as WAV bytes
 #[tauri::command]
+#[specta::specta]
 pub fn stop_recording(recorder: State<'_, RecorderState>) -> CommandResult<Vec<u8>> {
     let data = recorder.0.stop().map_err(|e| CommandError {
         message: format!("Failed to stop recording: {}", e),
@@ -1062,12 +1090,14 @@ pub fn stop_recording(recorder: State<'_, RecorderState>) -> CommandResult<Vec<u
 
 /// Check if currently recording
 #[tauri::command]
+#[specta::specta]
 pub fn is_recording(recorder: State<'_, RecorderState>) -> CommandResult<bool> {
     Ok(recorder.0.is_recording())
 }
 
 /// Get current audio input level (0.0 - 1.0)
 #[tauri::command]
+#[specta::specta]
 pub fn get_recording_level(recorder: State<'_, RecorderState>) -> CommandResult<f32> {
     Ok(recorder.0.get_level())
 }

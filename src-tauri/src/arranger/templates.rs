@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::groove::grid::GridPosition;
 
 /// Arrangement template defines the overall musical style
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ArrangementTemplate {
     /// Synthwave Straight - kick on 1/3, snare on 2/4, 8th hats
@@ -84,7 +84,7 @@ impl ArrangementTemplate {
 }
 
 /// Template rules define specific arrangement parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TemplateRules {
     /// Where kick drum hits should occur (positions within a bar pattern)
     pub kick_positions: Vec<GridPosition>,
@@ -103,7 +103,7 @@ pub struct TemplateRules {
 }
 
 /// Hi-hat density levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum HihatDensity {
     /// Sparse - occasional hi-hats
@@ -128,7 +128,7 @@ impl HihatDensity {
 }
 
 /// Bass rhythm patterns
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum BassRhythm {
     /// Whole notes - one note per bar

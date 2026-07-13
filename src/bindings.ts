@@ -9,9 +9,297 @@ export const commands = {
 async greet(name: string) : Promise<string> {
     return await TAURI_INVOKE("greet", { name });
 },
+async createProject(input: CreateProjectInput) : Promise<Result<Project, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_project", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getProject(id: string) : Promise<Result<Project | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_project", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listProjects() : Promise<Result<ProjectSummary[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_projects") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createRun(input: CreateRunInput) : Promise<Result<Run, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_run", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getRun(id: string) : Promise<Result<Run | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_run", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listRunsForProject(projectId: string) : Promise<Result<Run[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_runs_for_project", { projectId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getRunWithArtifacts(runId: string) : Promise<Result<RunWithArtifacts | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_run_with_artifacts", { runId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateRunStatus(input: UpdateRunStatusInput) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_run_status", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createArtifact(input: CreateArtifactInput) : Promise<Result<Artifact, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_artifact", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listCalibrationProfiles() : Promise<Result<CalibrationProfile[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_calibration_profiles") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createCalibrationProfile(input: CreateCalibrationProfileInput) : Promise<Result<CalibrationProfile, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_calibration_profile", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getCalibrationProfile(id: string) : Promise<Result<CalibrationProfile | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_calibration_profile", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateCalibrationProfile(input: UpdateCalibrationProfileInput) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_calibration_profile", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteCalibrationProfile(id: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_calibration_profile", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Detect onsets in audio data
+ */
+async detectOnsets(input: DetectOnsetsInput) : Promise<Result<OnsetDetectionResult, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("detect_onsets", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Detect and classify events in audio data
+ */
+async detectEvents(input: DetectEventsInput) : Promise<Result<EventDetectionResult, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("detect_events", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Extract features from a specific audio segment
+ */
+async extractFeatures(input: ExtractFeaturesInput) : Promise<Result<EventFeatures, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("extract_features", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Estimate tempo (BPM) from audio data
+ */
+async estimateTempo(input: EstimateTempoInput) : Promise<Result<TempoEstimate, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("estimate_tempo", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Quantize events to a musical grid
+ */
+async quantizeEventsCommand(input: QuantizeEventsInput) : Promise<Result<QuantizedEvent[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("quantize_events_command", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Arrange quantized events into a musical arrangement
+ */
+async arrangeEventsCommand(input: ArrangeEventsInput) : Promise<Result<Arrangement, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("arrange_events_command", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Export arrangement as MIDI file bytes
+ */
+async exportMidiCommand(input: ExportMidiInput) : Promise<Result<number[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_midi_command", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List all available themes with summaries
+ */
+async listThemes() : Promise<Result<ThemeSummary[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_themes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a specific theme by name
+ */
+async getTheme(name: string) : Promise<Result<Theme | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_theme", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get all theme names
+ */
+async listThemeNames() : Promise<Result<string[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_theme_names") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Render a preview of an arrangement to WAV audio
+ * 
+ * Note: This is a placeholder implementation that returns silent audio.
+ * Full audio synthesis will be implemented in a future update.
+ */
+async renderPreview(input: RenderPreviewInput) : Promise<Result<number[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("render_preview", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Start audio recording from the default input device
+ */
+async startRecording() : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_recording") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stop recording and return the audio data as WAV bytes
+ */
+async stopRecording() : Promise<Result<number[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_recording") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Check if currently recording
+ */
+async isRecording() : Promise<Result<boolean, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("is_recording") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get current audio input level (0.0 - 1.0)
+ */
+async getRecordingLevel() : Promise<Result<number, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_recording_level") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveEventDecisions(input: SaveEventDecisionsInput) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_event_decisions", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getEventDecisions(runId: string) : Promise<Result<EventDecision[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_event_decisions", { runId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -29,8 +317,344 @@ async listProjects() : Promise<Result<ProjectSummary[], CommandError>> {
 
 /** user-defined types **/
 
+/**
+ * Arpeggiator patterns
+ */
+export type ArpPattern = "Up158" | "Down851" | "Alternating" | "Random"
+export type ArrangeEventsInput = { events: QuantizedEvent[]; template: string; theme_name: string; bpm: number; time_signature: string; division: string; feel: string; swing_amount: number; bar_count: number; b_emphasis: number }
+/**
+ * An arranged note with timing and MIDI parameters
+ */
+export type ArrangedNote = { 
+/**
+ * Timestamp in milliseconds
+ */
+timestamp_ms: number; 
+/**
+ * Duration in milliseconds
+ */
+duration_ms: number; 
+/**
+ * MIDI velocity (0-127)
+ */
+velocity: number; 
+/**
+ * MIDI note override (if None, use lane's default)
+ */
+midi_note: number | null; 
+/**
+ * Link back to original event (if applicable)
+ */
+source_event_id: string | null }
+/**
+ * Complete arrangement with all lanes
+ */
+export type Arrangement = { 
+/**
+ * Drum lanes (kick, snare, hihat, etc.)
+ */
+drum_lanes: DrumLane[]; 
+/**
+ * Bass lane (for bass synth notes)
+ */
+bass_lane: DrumLane | null; 
+/**
+ * Pad lane (for sustained synth pads)
+ */
+pad_lane: DrumLane | null; 
+/**
+ * Arpeggiator lane
+ */
+arp_lane: DrumLane | null; 
+/**
+ * Arrangement metadata
+ */
+template: ArrangementTemplate; total_duration_ms: number; bar_count: number }
+/**
+ * Arrangement template defines the overall musical style
+ */
+export type ArrangementTemplate = 
+/**
+ * Synthwave Straight - kick on 1/3, snare on 2/4, 8th hats
+ * Classic synthwave beat with straight timing
+ */
+"synthwave_straight" | 
+/**
+ * Synthwave Halftime - kick sparse, snare on 3, slower hats
+ * More spacious, relaxed feel
+ */
+"synthwave_halftime" | 
+/**
+ * Arp Drive - minimal drums, heavy arpeggiation
+ * Focus on melodic elements with minimal rhythm
+ */
+"arp_drive"
+export type Artifact = { id: string; run_id: string; kind: ArtifactKind; path: string; sha256: string; bytes: number }
+export type ArtifactKind = "midi" | "audio" | "visualization" | "metadata"
+/**
+ * A simplified representation of a note assigned to an instrument lane
+ */
+export type AssignedNote = { 
+/**
+ * Name of the lane (e.g., "KICK", "SNARE")
+ */
+lane_name: string; 
+/**
+ * MIDI note number
+ */
+midi_note: number; 
+/**
+ * MIDI velocity
+ */
+velocity: number; 
+/**
+ * Duration in milliseconds
+ */
+duration_ms: number }
+/**
+ * Bass line patterns
+ */
+export type BassPattern = "Root" | "RootFifth" | "OffbeatEighths" | "Walking"
+export type CalibrationProfile = { id: string; name: string; created_at: string; profile_json_path: string; notes: string | null }
+/**
+ * Chord progression structure
+ */
+export type ChordProgression = { chords: ChordType[]; bars_per_chord: number }
+/**
+ * Chord types by scale degree
+ */
+export type ChordType = "I" | "II" | "III" | "IV" | "V" | "VI" | "VII" | "Im" | "IIm" | "IIIm" | "IVm" | "Vm" | "VIm" | "VIIm"
 export type CommandError = { message: string }
+export type CreateArtifactInput = { run_id: string; kind: string; filename: string; data: number[] }
+export type CreateCalibrationProfileInput = { name: string; profile_data: number[]; notes: string | null }
+export type CreateProjectInput = { name: string; input_data: number[] }
+export type CreateRunInput = { project_id: string; pipeline_version: string; theme: string; bpm: number; swing: number; quantize_strength: number; b_emphasis: number }
+export type DetectEventsInput = { file_path: string; run_id: string | null; use_calibration: boolean; calibration_profile_id: string | null }
+export type DetectOnsetsInput = { audio_data: number[]; window_size: number | null; hop_size: number | null; threshold_factor: number | null }
+/**
+ * A drum/instrument lane containing arranged notes
+ */
+export type DrumLane = { 
+/**
+ * Lane name (e.g., "KICK", "SNARE", "HIHAT")
+ */
+name: string; 
+/**
+ * MIDI note number for this lane
+ */
+midi_note: number; 
+/**
+ * All notes in this lane
+ */
+events: ArrangedNote[] }
+/**
+ * Drum kit palettes
+ */
+export type DrumPalette = "SynthwaveDrums" | "AcousticKit" | "TR808"
+export type EstimateTempoInput = { file_path: string }
+/**
+ * A detected beatbox event with timing, classification, and features
+ */
+export type Event = { 
+/**
+ * Unique identifier for this event
+ */
+id: string; 
+/**
+ * Timestamp in milliseconds from start of audio
+ */
+timestamp_ms: number; 
+/**
+ * Duration of event in milliseconds
+ * Calculated from onset to next onset or energy decay
+ */
+duration_ms: number; 
+/**
+ * Classified event type
+ */
+class: EventClass; 
+/**
+ * Classification confidence score [0.0, 1.0]
+ * Higher values indicate stronger feature match
+ */
+confidence: number; 
+/**
+ * Extracted audio features used for classification
+ */
+features: EventFeatures }
+/**
+ * Classification of detected beatbox events
+ * Maps beatbox sounds to musical instruments/synthesis targets
+ */
+export type EventClass = 
+/**
+ * B/P sounds - bilabial plosives
+ * Triggers: synth bass + kick drum
+ * Characteristics: Low frequency, sharp attack, strong low-mid energy
+ */
+"BilabialPlosive" | 
+/**
+ * S/SH/TS sounds - high-frequency noise
+ * Triggers: hi-hats, cymbals
+ * Characteristics: High spectral centroid, high ZCR, strong high-frequency energy
+ */
+"HihatNoise" | 
+/**
+ * T/K sounds - dental/velar plosives
+ * Triggers: snares, claps, rimshots
+ * Characteristics: Mid spectral centroid, sharp transient, mid-band energy
+ */
+"Click" | 
+/**
+ * Vowel sounds, humming, voiced tones
+ * Triggers: pads, bass lines, melodic elements
+ * Characteristics: Sustained energy, lower ZCR, periodic/harmonic content
+ */
+"HumVoiced"
+export type EventData = { id: string; timestamp_ms: number; duration_ms: number; class: string; confidence: number; features: EventFeatures }
+/**
+ * Complete decision information for a single event
+ * showing how it moved through the pipeline
+ */
+export type EventDecision = { 
+/**
+ * Original event ID
+ */
+event_id: string; timestamp_ms: number; duration_ms: number; class: EventClass; confidence: number; features: EventFeatures; quantized_timestamp_ms: number | null; snap_delta_ms: number | null; grid_position: string | null; assigned_notes: AssignedNote[]; reasoning: string }
+export type EventDetectionResult = { events: EventData[]; total_count: number }
+/**
+ * Spectral and temporal features extracted from an audio segment
+ * Used for classification and calibration
+ */
+export type EventFeatures = { 
+/**
+ * Spectral centroid (Hz) - "center of mass" of spectrum
+ * Higher values indicate brighter/higher-pitched sounds
+ */
+spectral_centroid: number; 
+/**
+ * Zero-crossing rate (crossings per sample)
+ * Higher values indicate noisy/unvoiced content
+ */
+zcr: number; 
+/**
+ * Energy in low frequency band (0-200 Hz)
+ * Normalized to [0, 1] relative to total energy
+ */
+low_band_energy: number; 
+/**
+ * Energy in mid frequency band (200-2000 Hz)
+ * Normalized to [0, 1] relative to total energy
+ */
+mid_band_energy: number; 
+/**
+ * Energy in high frequency band (2000+ Hz)
+ * Normalized to [0, 1] relative to total energy
+ */
+high_band_energy: number; 
+/**
+ * Peak amplitude of the audio segment [0.0, 1.0]
+ * Used for velocity/dynamics: louder sounds produce louder MIDI notes
+ */
+peak_amplitude: number; 
+/**
+ * Crest factor: peak_amplitude / RMS. Higher values indicate transient sounds
+ * (plosives, clicks), lower values indicate sustained sounds (hums, vowels).
+ * Typical ranges: plosive ~4-10, sustained hum ~1.2-2.0
+ */
+crest_factor?: number }
+export type ExportMidiInput = { arrangement: Arrangement; bpm: number; time_signature: string; division: string; feel: string; swing_amount: number; bar_count: number; ppq: number | null; include_tempo: boolean | null; include_time_signature: boolean | null; track_names: boolean | null }
+export type ExtractFeaturesInput = { audio_data: number[]; start_ms: number; duration_ms: number }
+/**
+ * Effects profiles
+ */
+export type FxProfile = "GatedReverb" | "WideChorus" | "DarkDelay" | "Dry"
+/**
+ * Grid position - describes location in musical time
+ */
+export type GridPosition = { 
+/**
+ * Bar number (0-indexed)
+ */
+bar: number; 
+/**
+ * Beat number within bar (0-indexed)
+ */
+beat: number; 
+/**
+ * Subdivision within beat (0-indexed)
+ */
+subdivision: number }
+/**
+ * Mixer settings for final audio rendering
+ */
+export type MixerSettings = { kick_volume: number; snare_volume: number; hihat_volume: number; bass_volume: number; pad_volume: number; arp_volume: number; master_volume: number; sidechain_intensity: number }
+export type OnsetData = { timestamp_ms: number; strength: number }
+export type OnsetDetectionResult = { onsets: OnsetData[]; total_count: number }
+export type Project = { id: string; created_at: string; name: string; input_path: string; input_sha256: string; duration_ms: number }
 export type ProjectSummary = { id: string; name: string; created_at: string; duration_ms: number; run_count: number }
+export type QuantizeEventsInput = { events: EventData[]; bpm: number; time_signature: string; division: string; feel: string; swing_amount: number; bar_count: number; quantize_strength: number; lookahead_ms: number }
+/**
+ * A quantized event with both original and quantized timing
+ */
+export type QuantizedEvent = { 
+/**
+ * The original event data
+ */
+original_event: Event; 
+/**
+ * Original timestamp before quantization
+ */
+original_timestamp_ms: number; 
+/**
+ * Quantized timestamp after grid alignment
+ */
+quantized_timestamp_ms: number; 
+/**
+ * How much the event moved (positive = later, negative = earlier)
+ */
+snap_delta_ms: number; 
+/**
+ * Position on the musical grid
+ */
+grid_position: GridPosition }
+export type RenderPreviewInput = { arrangement: Arrangement; theme_name: string; duration_seconds: number; sample_rate: number | null; mixer_settings: MixerSettings | null }
+export type Run = { id: string; project_id: string; created_at: string; pipeline_version: string; theme: string; bpm: number; swing: number; quantize_strength: number; b_emphasis: number; status: RunStatus }
+export type RunStatus = "pending" | "processing" | "complete" | "failed"
+export type RunWithArtifacts = { run: Run; artifacts: Artifact[] }
+export type SaveEventDecisionsInput = { run_id: string; events: EventData[]; quantized_events: QuantizedEvent[] | null; arrangement: Arrangement | null }
+/**
+ * Musical scale families
+ */
+export type ScaleFamily = "MinorPentatonic" | "NaturalMinor" | "HarmonicMinor" | "Dorian" | "Phrygian"
+/**
+ * Tempo estimation result with BPM and beat grid positions
+ */
+export type TempoEstimate = { 
+/**
+ * Estimated beats per minute
+ */
+bpm: number; 
+/**
+ * Confidence in the estimate [0.0, 1.0]
+ * Higher values indicate stronger periodic structure
+ */
+confidence: number; 
+/**
+ * Estimated beat grid positions in milliseconds
+ * These are the predicted locations of beats
+ */
+beat_positions_ms: number[] }
+/**
+ * Complete theme definition
+ */
+export type Theme = { name: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily; chord_progression: ChordProgression; bass_pattern: BassPattern; arp_pattern: ArpPattern; arp_octave_range: [number, number]; drum_palette: DrumPalette; fx_profile: FxProfile; synth_stab_velocity: number; pad_sustain: boolean }
+/**
+ * Theme summary for UI display
+ */
+export type ThemeSummary = { name: string; description: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily }
+export type UpdateCalibrationProfileInput = { id: string; name: string | null; notes: string | null }
+export type UpdateRunStatusInput = { run_id: string; status: string }
 
 /** tauri-specta globals **/
 

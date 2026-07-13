@@ -36,7 +36,7 @@ impl Default for QuantizeSettings {
 }
 
 /// A quantized event with both original and quantized timing
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct QuantizedEvent {
     /// The original event data
     pub original_event: Event,

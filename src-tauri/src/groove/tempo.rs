@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::audio::features::Onset;
 
 /// Tempo estimation result with BPM and beat grid positions
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TempoEstimate {
     /// Estimated beats per minute
     pub bpm: f64,

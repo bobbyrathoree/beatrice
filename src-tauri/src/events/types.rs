@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 /// Classification of detected beatbox events
 /// Maps beatbox sounds to musical instruments/synthesis targets
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 pub enum EventClass {
     /// B/P sounds - bilabial plosives
     /// Triggers: synth bass + kick drum
@@ -65,7 +65,7 @@ impl EventClass {
 
 /// Spectral and temporal features extracted from an audio segment
 /// Used for classification and calibration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct EventFeatures {
     /// Spectral centroid (Hz) - "center of mass" of spectrum
     /// Higher values indicate brighter/higher-pitched sounds
@@ -131,7 +131,7 @@ impl EventFeatures {
 }
 
 /// A detected beatbox event with timing, classification, and features
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Event {
     /// Unique identifier for this event
     pub id: Uuid,

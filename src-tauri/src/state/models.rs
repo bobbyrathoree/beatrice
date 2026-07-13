@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Project {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
@@ -13,7 +13,7 @@ pub struct Project {
     pub duration_ms: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Run {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -27,7 +27,7 @@ pub struct Run {
     pub status: RunStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum RunStatus {
     Pending,
@@ -57,7 +57,7 @@ impl RunStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Artifact {
     pub id: Uuid,
     pub run_id: Uuid,
@@ -67,7 +67,7 @@ pub struct Artifact {
     pub bytes: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum ArtifactKind {
     Midi,
@@ -97,7 +97,7 @@ impl ArtifactKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct CalibrationProfile {
     pub id: Uuid,
     pub name: String,
@@ -115,7 +115,7 @@ pub struct ProjectSummary {
     pub run_count: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RunWithArtifacts {
     pub run: Run,
     pub artifacts: Vec<Artifact>,
