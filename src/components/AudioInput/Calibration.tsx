@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { invoke } from '@tauri-apps/api/core';
+import { commands, unwrap } from '../../types/ipc';
 
 interface CalibrationProps {
   onComplete: (profileId: string) => void;
@@ -128,13 +128,13 @@ export function Calibration({ onComplete, onCancel }: CalibrationProps) {
       const mockAudioData = generateMockAudioData(currentClass.name);
 
       // Extract features from the audio segment
-      const features = await invoke<any>('extract_features', {
-        input: {
-          audio_data: mockAudioData,
+      const features = unwrap(
+        await commands.extractFeatures({
+          audio_data: Array.from(mockAudioData),
           start_ms: 0,
           duration_ms: 50,
-        },
-      });
+        })
+      );
 
       // Create calibration sample
       const sample: CalibrationSample = {
@@ -176,13 +176,13 @@ export function Calibration({ onComplete, onCancel }: CalibrationProps) {
       const profileData = new TextEncoder().encode(JSON.stringify(profile));
 
       // Save via Tauri command
-      const result = await invoke<any>('create_calibration_profile', {
-        input: {
+      const result = unwrap(
+        await commands.createCalibrationProfile({
           name: profileName,
           profile_data: Array.from(profileData),
           notes: profile.notes,
-        },
-      });
+        })
+      );
 
       onComplete(result.id);
     } catch (err) {

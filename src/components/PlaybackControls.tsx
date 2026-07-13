@@ -10,6 +10,37 @@ interface PlaybackControlsProps {
   theme: Theme | null;
 }
 
+interface SectionInfo {
+  name: string;
+  color: string;
+  chord?: string;
+  lanes: string[];
+}
+
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+// Map a Roman-numeral scale degree (theme chord progression) to a concrete chord
+// label, given the theme's root MIDI note. Covers the degrees used by the shipped
+// themes; unknown degrees fall back to the bare root note name.
+const CHORD_LABELS: Record<string, (root: number) => string> = {
+  Im: (r) => NOTE_NAMES[r % 12] + "m",
+  III: (r) => NOTE_NAMES[(r + 3) % 12],
+  VI: (r) => NOTE_NAMES[(r + 8) % 12],
+  VII: (r) => NOTE_NAMES[(r + 10) % 12],
+  IV: (r) => NOTE_NAMES[(r + 5) % 12] + "m",
+  V: (r) => NOTE_NAMES[(r + 7) % 12] + "m",
+};
+
+/** Resolve the chord label active at a given bar for a theme, "" if no theme. */
+function chordLabelAtBar(theme: Theme | null, bar: number): string {
+  if (!theme) return '';
+  const { chords, bars_per_chord } = theme.chord_progression;
+  if (!chords.length) return '';
+  const degree = chords[Math.floor(bar / Math.max(1, bars_per_chord)) % chords.length];
+  const label = CHORD_LABELS[degree];
+  return label ? label(theme.root_note) : NOTE_NAMES[theme.root_note % 12];
+}
+
 /** Format seconds as "MM:SS.d" */
 function formatTime(seconds: number): string {
   const clamped = Math.max(0, seconds);
@@ -31,32 +62,20 @@ export function PlaybackControls({
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
 
   // Arrangement HUD Logic
-  const getSectionInfo = () => {
+  const getSectionInfo = (): SectionInfo => {
     if (!isPlaying || duration === 0) return { name: 'READY', color: '#666', lanes: [] };
-    
+
     const loopIdx = Math.floor((currentTime / duration) * 4);
     const loopDuration = duration / 4;
     const timeInLoop = currentTime % loopDuration;
-    
-    // Determine Chord
-    let chordName = '';
-    if (theme) {
-      const chords = theme.chord_progression.chords;
-      const barsPerChord = theme.chord_progression.bars_per_chord;
-      const msPerBar = (loopDuration * 1000) / 4; // Assuming 4 bars per loop for HUD simplicity
-      const bar = Math.floor((timeInLoop * 1000) / msPerBar);
-      const chordIdx = Math.floor(bar / barsPerChord) % chords.len; // Wait, chords is an array in JS
-      // Actually, let's just use the theme name to decide the hardcoded names for the demo
-      if (theme.name.toUpperCase().includes('BLADE')) {
-        const brChords = ['Dm', 'Bb', 'F', 'C'];
-        chordName = brChords[Math.floor(bar / 2) % 4];
-      } else {
-        const stChords = ['Cm', 'Bb', 'Ab', 'Bb'];
-        chordName = stChords[Math.floor(bar / 2) % 4];
-      }
-    }
 
-    switch(loopIdx) {
+    // Determine the active chord from the theme's progression.
+    // Each loop covers 4 bars for HUD purposes.
+    const msPerBar = (loopDuration * 1000) / 4;
+    const bar = msPerBar > 0 ? Math.floor((timeInLoop * 1000) / msPerBar) : 0;
+    const chordName = chordLabelAtBar(theme, bar);
+
+    switch (loopIdx) {
       case 0: return { name: 'INTRO', color: '#00FFFF', chord: '', lanes: ['KICK', 'HIHAT'] };
       case 1: return { name: 'BUILD', color: '#00FF00', chord: chordName, lanes: ['KICK', 'HIHAT', 'SNARE', 'BASS'] };
       case 2: return { name: 'DROP', color: '#FF00FF', chord: chordName, lanes: ['KICK', 'HIHAT', 'SNARE', 'BASS', 'PAD', 'ARP'] };

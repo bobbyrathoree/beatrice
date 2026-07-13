@@ -1,31 +1,11 @@
-// React hooks for project and run management via Tauri IPC
+// React hooks for project and run management via the generated Tauri bindings.
 import { useEffect, useState, useCallback } from 'react';
-import { getTauriAPI } from '../utils/tauri-mock';
+import { commands, unwrap, formatIpcError } from '../types/ipc';
+import type { ProjectSummary, RunWithArtifacts, CalibrationProfile } from '../types/ipc';
 import { Project, Run, Artifact } from '../store/useStore';
 
-// Get Tauri API (real or mock depending on environment)
-const tauri = getTauriAPI();
-
-export interface ProjectSummary {
-  id: string;
-  name: string;
-  created_at: string;
-  duration_ms: number;
-  run_count: number;
-}
-
-export interface RunWithArtifacts {
-  run: Run;
-  artifacts: Artifact[];
-}
-
-export interface CalibrationProfile {
-  id: string;
-  name: string;
-  created_at: string;
-  profile_json_path: string;
-  notes?: string;
-}
+// Re-export generated types so existing consumers (App.tsx, SessionSidebar) keep working.
+export type { ProjectSummary, RunWithArtifacts, CalibrationProfile } from '../types/ipc';
 
 // ==================== PROJECT HOOKS ====================
 
@@ -41,10 +21,10 @@ export function useProjects() {
     try {
       setLoading(true);
       setError(null);
-      const result = await tauri.invoke<ProjectSummary[]>('list_projects');
+      const result = unwrap(await commands.listProjects());
       setProjects(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatIpcError(err));
     } finally {
       setLoading(false);
     }
@@ -58,16 +38,16 @@ export function useProjects() {
     async (name: string, inputData: Uint8Array): Promise<Project | null> => {
       try {
         setError(null);
-        const project = await tauri.invoke<Project>('create_project', {
-          input: {
+        const project = unwrap(
+          await commands.createProject({
             name,
             input_data: Array.from(inputData),
-          },
-        });
+          })
+        );
         await refresh();
         return project;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatIpcError(err));
         return null;
       }
     },
@@ -77,10 +57,10 @@ export function useProjects() {
   const getProject = useCallback(async (id: string): Promise<Project | null> => {
     try {
       setError(null);
-      const project = await tauri.invoke<Project | null>('get_project', { id });
+      const project = unwrap(await commands.getProject(id));
       return project;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatIpcError(err));
       return null;
     }
   }, []);
@@ -114,12 +94,10 @@ export function useRuns(projectId: string | null) {
     try {
       setLoading(true);
       setError(null);
-      const result = await tauri.invoke<Run[]>('list_runs_for_project', {
-        project_id: projectId,
-      });
+      const result = unwrap(await commands.listRunsForProject(projectId));
       setRuns(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatIpcError(err));
     } finally {
       setLoading(false);
     }
@@ -142,8 +120,8 @@ export function useRuns(projectId: string | null) {
 
       try {
         setError(null);
-        const run = await tauri.invoke<Run>('create_run', {
-          input: {
+        const run = unwrap(
+          await commands.createRun({
             project_id: projectId,
             pipeline_version: params.pipelineVersion,
             theme: params.theme,
@@ -151,12 +129,12 @@ export function useRuns(projectId: string | null) {
             swing: params.swing,
             quantize_strength: params.quantizeStrength,
             b_emphasis: params.bEmphasis,
-          },
-        });
+          })
+        );
         await refresh();
         return run;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatIpcError(err));
         return null;
       }
     },
@@ -166,10 +144,10 @@ export function useRuns(projectId: string | null) {
   const getRun = useCallback(async (runId: string): Promise<Run | null> => {
     try {
       setError(null);
-      const run = await tauri.invoke<Run | null>('get_run', { id: runId });
+      const run = unwrap(await commands.getRun(runId));
       return run;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatIpcError(err));
       return null;
     }
   }, []);
@@ -178,13 +156,10 @@ export function useRuns(projectId: string | null) {
     async (runId: string): Promise<RunWithArtifacts | null> => {
       try {
         setError(null);
-        const result = await tauri.invoke<RunWithArtifacts | null>(
-          'get_run_with_artifacts',
-          { run_id: runId }
-        );
+        const result = unwrap(await commands.getRunWithArtifacts(runId));
         return result;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatIpcError(err));
         return null;
       }
     },
@@ -198,16 +173,16 @@ export function useRuns(projectId: string | null) {
     ): Promise<boolean> => {
       try {
         setError(null);
-        await tauri.invoke('update_run_status', {
-          input: {
+        unwrap(
+          await commands.updateRunStatus({
             run_id: runId,
             status,
-          },
-        });
+          })
+        );
         await refresh();
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatIpcError(err));
         return false;
       }
     },
@@ -243,17 +218,17 @@ export function useArtifacts() {
     }): Promise<Artifact | null> => {
       try {
         setError(null);
-        const artifact = await tauri.invoke<Artifact>('create_artifact', {
-          input: {
+        const artifact = unwrap(
+          await commands.createArtifact({
             run_id: params.runId,
             kind: params.kind,
             filename: params.filename,
             data: Array.from(params.data),
-          },
-        });
+          })
+        );
         return artifact;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatIpcError(err));
         return null;
       }
     },
@@ -280,12 +255,10 @@ export function useCalibrationProfiles() {
     try {
       setLoading(true);
       setError(null);
-      const result = await tauri.invoke<CalibrationProfile[]>(
-        'list_calibration_profiles'
-      );
+      const result = unwrap(await commands.listCalibrationProfiles());
       setProfiles(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatIpcError(err));
     } finally {
       setLoading(false);
     }
@@ -303,20 +276,17 @@ export function useCalibrationProfiles() {
     ): Promise<CalibrationProfile | null> => {
       try {
         setError(null);
-        const profile = await tauri.invoke<CalibrationProfile>(
-          'create_calibration_profile',
-          {
-            input: {
-              name,
-              profile_data: Array.from(profileData),
-              notes,
-            },
-          }
+        const profile = unwrap(
+          await commands.createCalibrationProfile({
+            name,
+            profile_data: Array.from(profileData),
+            notes: notes ?? null,
+          })
         );
         await refresh();
         return profile;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatIpcError(err));
         return null;
       }
     },
@@ -327,13 +297,10 @@ export function useCalibrationProfiles() {
     async (id: string): Promise<CalibrationProfile | null> => {
       try {
         setError(null);
-        const profile = await tauri.invoke<CalibrationProfile | null>(
-          'get_calibration_profile',
-          { id }
-        );
+        const profile = unwrap(await commands.getCalibrationProfile(id));
         return profile;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatIpcError(err));
         return null;
       }
     },
@@ -347,16 +314,17 @@ export function useCalibrationProfiles() {
     ): Promise<boolean> => {
       try {
         setError(null);
-        await tauri.invoke('update_calibration_profile', {
-          input: {
+        unwrap(
+          await commands.updateCalibrationProfile({
             id,
-            ...updates,
-          },
-        });
+            name: updates.name ?? null,
+            notes: updates.notes ?? null,
+          })
+        );
         await refresh();
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatIpcError(err));
         return false;
       }
     },
@@ -367,11 +335,11 @@ export function useCalibrationProfiles() {
     async (id: string): Promise<boolean> => {
       try {
         setError(null);
-        await tauri.invoke('delete_calibration_profile', { id });
+        unwrap(await commands.deleteCalibrationProfile(id));
         await refresh();
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatIpcError(err));
         return false;
       }
     },

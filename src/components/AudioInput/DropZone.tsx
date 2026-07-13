@@ -1,6 +1,6 @@
 import { useState, useRef, DragEvent } from 'react';
 import { motion } from 'framer-motion';
-import { invoke } from '@tauri-apps/api/core';
+import { commands, unwrap } from '../../types/ipc';
 import type { Project } from '../../store/useStore';
 
 interface DropZoneProps {
@@ -47,12 +47,12 @@ export function DropZone({ onProjectCreated, onError }: DropZoneProps) {
       const uint8Array = new Uint8Array(arrayBuffer);
 
       // Create project via Tauri command
-      const project = await invoke<Project>('create_project', {
-        input: {
+      const project = unwrap(
+        await commands.createProject({
           name: file.name.replace('.wav', ''),
           input_data: Array.from(uint8Array),
-        },
-      });
+        })
+      );
 
       // Update file info with duration
       setFileInfo((prev) => prev ? {

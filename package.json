@@ -8,6 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "lint:ipc": "! grep -rln --include=*.ts --include=*.tsx @tauri-apps/api/core src | grep -v -e ^src/bindings.ts$ -e ^src/utils/tauri-mock.ts$ -e \\.test\\.ts$ -e \\.test\\.tsx$",
+    "check": "tsc --noEmit && npm run lint:ipc",
     "tauri": "tauri"
   },
   "dependencies": {

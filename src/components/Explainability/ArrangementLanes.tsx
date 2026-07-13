@@ -1,45 +1,28 @@
 import { motion } from 'framer-motion';
 import { useMemo } from 'react';
-
-interface ArrangementNote {
-  timestamp_ms: number;
-  duration_ms: number;
-  velocity: number;
-  midi_note?: number;
-}
-
-interface ArrangementLane {
-  name: string;
-  events: ArrangementNote[];
-}
-
-interface Arrangement {
-  drum_lanes: ArrangementLane[];
-  bass_lane?: ArrangementLane;
-  pad_lane?: ArrangementLane;
-  arp_lane?: ArrangementLane;
-  total_duration_ms: number;
-}
+import type { Arrangement, DrumLane } from '../../types/ipc';
 
 interface ArrangementLanesProps {
   arrangement: Arrangement;
   currentTime: number; // in seconds
   isPlaying: boolean;
-  themeName?: string;
 }
 
-export function ArrangementLanes({ arrangement, currentTime, isPlaying, themeName }: ArrangementLanesProps) {
-  const loopCount = 4;
-  const loopDurationMs = arrangement.total_duration_ms;
-  const totalSongDurationMs = loopDurationMs * loopCount;
-  
+export function ArrangementLanes({ arrangement, currentTime, isPlaying }: ArrangementLanesProps) {
+  // The backend already returns the fully expanded song (Intro/Build/Drop/Outro),
+  // so `total_duration_ms` is the true song length. There are still 4 conceptual
+  // sections drawn across the width, hence SECTION_COUNT for layout math.
+  const SECTION_COUNT = 4;
+  const totalSongDurationMs = arrangement.total_duration_ms;
+  const sectionDurationMs = totalSongDurationMs / SECTION_COUNT;
+
   const lanes = useMemo(() => {
     const allLanes = [
       ...arrangement.drum_lanes,
       arrangement.bass_lane,
       arrangement.pad_lane,
       arrangement.arp_lane,
-    ].filter(Boolean) as ArrangementLane[];
+    ].filter(Boolean) as DrumLane[];
     return allLanes;
   }, [arrangement]);
 
@@ -50,16 +33,6 @@ export function ArrangementLanes({ arrangement, currentTime, isPlaying, themeNam
     if (n.includes('SNARE')) return 'SNARE';
     if (n.includes('HIHAT')) return 'HIHAT';
     return n;
-  };
-
-  // Check if a lane should be muted in a specific loop (Song Mode logic)
-  const isLaneActiveInLoop = (laneName: string, loopIdx: number) => {
-    const name = laneName.toUpperCase();
-    if (loopIdx === 0) return name.includes('KICK') || name.includes('HIHAT');
-    if (loopIdx === 1) return name.includes('KICK') || name.includes('HIHAT') || name.includes('SNARE') || name.includes('BASS');
-    if (loopIdx === 2) return true;
-    if (loopIdx === 3) return name.includes('BASS');
-    return false;
   };
 
   const getLoopColor = (loopIdx: number) => {
@@ -141,44 +114,34 @@ export function ArrangementLanes({ arrangement, currentTime, isPlaying, themeNam
               {getDisplayName(lane.name)}
             </div>
 
-            {/* Note Grid */}
+            {/* Note Grid — notes carry absolute timestamps across the full song,
+                so each is drawn once, positioned over total_duration_ms and
+                colored by the section (Intro/Build/Drop/Outro) it lands in. */}
             <div style={{ flex: 1, position: 'relative', height: '100%' }}>
-              {[0, 1, 2, 3].map((loopIdx) => {
-                const isActive = isLaneActiveInLoop(lane.name, loopIdx);
-                if (!isActive) return null;
+              {lane.events.map((note, i) => {
+                const notePos = (note.timestamp_ms / totalSongDurationMs) * 100;
+                const noteWidth = (note.duration_ms / totalSongDurationMs) * 100;
+                const sectionIdx = Math.min(
+                  SECTION_COUNT - 1,
+                  Math.floor(note.timestamp_ms / sectionDurationMs)
+                );
+                const color = getLoopColor(sectionIdx);
 
-                const color = getLoopColor(loopIdx);
-                const loopStartPercent = (loopIdx / loopCount) * 100;
-                
                 return (
-                  <div key={loopIdx} style={{
-                    position: 'absolute',
-                    left: `${loopStartPercent}%`,
-                    width: `${100 / loopCount}%`,
-                    height: '100%',
-                  }}>
-                    {lane.events.map((note, i) => {
-                      const notePos = (note.timestamp_ms / loopDurationMs) * 100;
-                      const noteWidth = (note.duration_ms / loopDurationMs) * 100;
-                      
-                      return (
-                        <div
-                          key={i}
-                          style={{
-                            position: 'absolute',
-                            left: `${notePos}%`,
-                            width: `${Math.max(1, noteWidth)}%`,
-                            height: '60%',
-                            top: '20%',
-                            backgroundColor: color,
-                            borderRadius: '1px',
-                            opacity: 0.8,
-                            boxShadow: `0 0 4px ${color}44`,
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
+                  <div
+                    key={i}
+                    style={{
+                      position: 'absolute',
+                      left: `${notePos}%`,
+                      width: `${Math.max(1, noteWidth)}%`,
+                      height: '60%',
+                      top: '20%',
+                      backgroundColor: color,
+                      borderRadius: '1px',
+                      opacity: 0.8,
+                      boxShadow: `0 0 4px ${color}44`,
+                    }}
+                  />
                 );
               })}
             </div>
@@ -210,29 +173,18 @@ export function ArrangementLanes({ arrangement, currentTime, isPlaying, themeNam
           ))}
         </div>
 
-        {/* Playhead */}
+        {/* Playhead. The lane label occupies a fixed 80px gutter, so the playhead
+            sweeps across the remaining (100% - 80px) width proportional to progress. */}
         {isPlaying && (
           <motion.div
-            style={{
-              position: 'absolute',
-              top: 0,
-              bottom: 0,
-              left: '80px',
-              width: '2px',
-              backgroundColor: '#FFF',
-              boxShadow: '0 0 10px #FFF',
-              zIndex: 10,
-              pointerEvents: 'none',
-            }}
             animate={{
-              left: `calc(80px + ${Math.min(100, (currentTime / (totalSongDurationMs / 1000)) * 100)}% - 80px * ${currentTime / (totalSongDurationMs / 1000)})`
+              left: `calc(80px + (100% - 80px) * ${Math.min(1, currentTime / (totalSongDurationMs / 1000))})`,
             }}
-            // Use a simpler approach for the left calculation
+            transition={{ ease: 'linear', duration: 0.1 }}
             style={{
               position: 'absolute',
               top: 0,
               bottom: 0,
-              left: `calc(80px + (100% - 80px) * ${Math.min(1, currentTime / (totalSongDurationMs / 1000))})`,
               width: '2px',
               backgroundColor: '#FFF',
               boxShadow: '0 0 10px #FFF',

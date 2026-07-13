@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { invoke } from '@tauri-apps/api/core';
 
 export interface GridSettings {
   bpm: number;
@@ -17,29 +16,21 @@ export interface QuantizeSettings {
   lookahead_ms: number;
 }
 
-export interface TempoEstimate {
-  bpm: number;
-  confidence: number;
-  beat_positions_ms: number[];
-}
-
 interface GrooveControlsProps {
+  // `audioData` is accepted for API compatibility with App.tsx but no longer used
+  // here: automatic tempo estimation was removed (the previous `estimate_tempo`
+  // invoke passed `audio_data` while the backend expects a `file_path`). Task 6
+  // restores honest tempo estimation. BPM is driven by the manual control below.
   audioData?: Uint8Array;
   onGridChange: (settings: GridSettings) => void;
   onQuantizeChange: (settings: QuantizeSettings) => void;
-  onTempoEstimated?: (estimate: TempoEstimate) => void;
 }
 
 export function GrooveControls({
-  audioData,
   onGridChange,
   onQuantizeChange,
-  onTempoEstimated,
 }: GrooveControlsProps) {
   // Tempo state
-  const [estimatedBpm, setEstimatedBpm] = useState<number | null>(null);
-  const [confidence, setConfidence] = useState<number>(0);
-  const [isEstimating, setIsEstimating] = useState(false);
   const [manualBpm, setManualBpm] = useState<number>(120);
   const [useManualBpm, setUseManualBpm] = useState(false);
 
@@ -53,43 +44,10 @@ export function GrooveControls({
   // Quantize settings
   const [quantizeStrength, setQuantizeStrength] = useState<number>(0.8);
 
-  // Estimate tempo when audio data is provided
-  useEffect(() => {
-    if (audioData && !isEstimating && estimatedBpm === null) {
-      estimateTempo();
-    }
-  }, [audioData]);
-
-  const estimateTempo = async () => {
-    if (!audioData) return;
-
-    setIsEstimating(true);
-    try {
-      const estimate = await invoke<TempoEstimate>('estimate_tempo', {
-        input: {
-          audio_data: Array.from(audioData),
-        },
-      });
-
-      setEstimatedBpm(estimate.bpm);
-      setConfidence(estimate.confidence);
-      setManualBpm(Math.round(estimate.bpm));
-
-      if (onTempoEstimated) {
-        onTempoEstimated(estimate);
-      }
-    } catch (err) {
-      console.error('Failed to estimate tempo:', err);
-      setEstimatedBpm(120);
-      setConfidence(0);
-    } finally {
-      setIsEstimating(false);
-    }
-  };
+  const currentBpm = useManualBpm ? manualBpm : 120;
 
   // Update grid settings
   useEffect(() => {
-    const currentBpm = useManualBpm ? manualBpm : (estimatedBpm || 120);
     onGridChange({
       bpm: currentBpm,
       time_signature: timeSignature,
@@ -98,7 +56,8 @@ export function GrooveControls({
       swing_amount: swingAmount / 100,
       bar_count: barCount,
     });
-  }, [useManualBpm, manualBpm, estimatedBpm, timeSignature, division, feel, swingAmount, barCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useManualBpm, manualBpm, timeSignature, division, feel, swingAmount, barCount]);
 
   // Update quantize settings
   useEffect(() => {
@@ -107,9 +66,8 @@ export function GrooveControls({
       swing_amount: swingAmount / 100,
       lookahead_ms: 100,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quantizeStrength, swingAmount]);
-
-  const currentBpm = useManualBpm ? manualBpm : (estimatedBpm || 120);
 
   return (
     <motion.div
@@ -138,7 +96,7 @@ export function GrooveControls({
               border: '3px solid #000',
               borderRadius: '4px',
               padding: '12px 24px',
-              backgroundColor: isEstimating ? '#FFFF00' : '#00FF00',
+              backgroundColor: '#00FF00',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -146,31 +104,10 @@ export function GrooveControls({
             }}
           >
             <div style={{ fontSize: '32px', fontWeight: 'bold', lineHeight: 1 }}>
-              {isEstimating ? '...' : Math.round(currentBpm)}
+              {Math.round(currentBpm)}
             </div>
             <div style={{ fontSize: '14px', fontWeight: 'bold' }}>BPM</div>
           </div>
-
-          {/* Confidence Indicator */}
-          {estimatedBpm !== null && !useManualBpm && (
-            <div
-              style={{
-                border: '3px solid #000',
-                borderRadius: '4px',
-                padding: '12px 16px',
-                backgroundColor: '#E0E0E0',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                minWidth: '100px',
-              }}
-            >
-              <div style={{ fontSize: '24px', fontWeight: 'bold', lineHeight: 1 }}>
-                {isNaN(confidence) ? 0 : Math.round(confidence * 100)}%
-              </div>
-              <div style={{ fontSize: '12px', fontWeight: 'bold' }}>CONFIDENCE</div>
-            </div>
-          )}
 
           {/* Manual Override Toggle */}
           <motion.button

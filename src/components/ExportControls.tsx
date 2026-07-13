@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { invoke } from '@tauri-apps/api/core';
+import { commands, unwrap, formatIpcError } from '../types/ipc';
+import type { Arrangement } from '../types/ipc';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 
 interface ExportControlsProps {
-  arrangement: any; // Arrangement from backend
+  arrangement: Arrangement;
   gridSettings: {
     bpm: number;
     time_signature: string;
@@ -45,8 +46,8 @@ export function ExportControls({
       setError(null);
 
       // Call backend to generate MIDI bytes
-      const midiBytes = await invoke<number[]>('export_midi_command', {
-        input: {
+      const midiBytes = unwrap(
+        await commands.exportMidiCommand({
           arrangement,
           bpm: gridSettings.bpm,
           time_signature: gridSettings.time_signature,
@@ -58,8 +59,8 @@ export function ExportControls({
           include_tempo: true,
           include_time_signature: true,
           track_names: true,
-        },
-      });
+        })
+      );
 
       // Prompt user for save location
       const filePath = await save({
@@ -82,7 +83,7 @@ export function ExportControls({
       setTimeout(() => setMidiStatus('idle'), 3000);
     } catch (err) {
       console.error('MIDI export failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to export MIDI');
+      setError(formatIpcError(err));
       setMidiStatus('error');
       setTimeout(() => setMidiStatus('idle'), 5000);
     }
@@ -97,15 +98,15 @@ export function ExportControls({
       const durationSeconds = (gridSettings.bar_count * 4 * 60) / gridSettings.bpm;
 
       // Call backend to render preview
-      const wavBytes = await invoke<number[]>('render_preview', {
-        input: {
+      const wavBytes = unwrap(
+        await commands.renderPreview({
           arrangement,
           theme_name: themeName,
           duration_seconds: durationSeconds,
           sample_rate: 44100,
           mixer_settings: null, // Use defaults
-        },
-      });
+        })
+      );
 
       // Prompt user for save location
       const filePath = await save({
@@ -128,7 +129,7 @@ export function ExportControls({
       setTimeout(() => setWavStatus('idle'), 3000);
     } catch (err) {
       console.error('WAV export failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to export WAV');
+      setError(formatIpcError(err));
       setWavStatus('error');
       setTimeout(() => setWavStatus('idle'), 5000);
     }

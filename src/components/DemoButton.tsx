@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { invoke } from '@tauri-apps/api/core';
+import { commands, unwrap } from '../types/ipc';
 import type { Project } from '../store/useStore';
 
 interface DemoButtonProps {
@@ -29,12 +29,12 @@ export function DemoButton({ onProjectCreated, onError, disabled = false }: Demo
       const demoSample = generateDemoSample();
 
       // Create project with demo data
-      const project = await invoke<Project>('create_project', {
-        input: {
+      const project = unwrap(
+        await commands.createProject({
           name: 'Demo Beatbox',
           input_data: Array.from(demoSample),
-        },
-      });
+        })
+      );
 
       onProjectCreated(project);
     } catch (err) {

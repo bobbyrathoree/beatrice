@@ -2,7 +2,17 @@
  * Tauri API Mock for Browser Development
  *
  * Provides mock implementations of Tauri commands for browser-only mode.
- * Mock return types match the actual Rust backend command signatures.
+ * In browser/demo builds, `vite.config.ts` aliases `@tauri-apps/api/core` to this
+ * file, so this module's `invoke`/`Channel`/`Resource` stand in for the real ones.
+ *
+ * IMPORTANT — return convention:
+ *   The generated `src/bindings.ts` calls the RAW `TAURI_INVOKE` (this `invoke`)
+ *   and wraps its result: `{ status: "ok", data: await TAURI_INVOKE(...) }`.
+ *   Therefore each handler here returns the BARE value (the `data` payload), NOT a
+ *   `{status:"ok"}` object — the bindings layer adds that wrapper. A real backend
+ *   error is a promise REJECTION, so handlers THROW to signal errors. Contract drift
+ *   (missing camelCase arg key, or an unknown command) also throws, exactly like the
+ *   real `TAURI_INVOKE` would reject — this is what surfaces snake_case/camelCase bugs.
  */
 
 // Stub classes required by @tauri-apps/plugin-fs when aliased through this mock
@@ -69,323 +79,370 @@ function generateMockEvents(audioBytes: number[]): any[] {
   return events;
 }
 
-export const invoke = async <T = any>(command: string, args?: any): Promise<T> => {
+// Build the mock Arrangement from quantized events (mirrors Rust arranger + expand_to_song)
+function buildMockArrangement(args: Record<string, any>): unknown {
+  const quantizedEvents = args?.input?.events || [];
+  const bpm = args?.input?.bpm || 120;
+  const barCount = args?.input?.bar_count || 4;
+  const totalDurationMs = (barCount * 4 * 60000) / bpm;
+  const template = args?.input?.template || 'synthwave_straight';
+
+  // Sort events into drum lanes by class
+  const kickEvents: any[] = [];
+  const snareEvents: any[] = [];
+  const hihatEvents: any[] = [];
+  const bassEvents: any[] = [];
+  const padEvents: any[] = [];
+  const arpEvents: any[] = [];
+
+  const msPerBeat = 60000 / bpm;
+  const msPerBar = msPerBeat * 4;
+
+  // Mock harmonic progression: Dm -> Bb -> F -> C
+  const chords = [
+    { root: 50, third: 53, fifth: 57 }, // Dm (D3, F3, A3)
+    { root: 58, third: 62, fifth: 65 }, // Bb (Bb3, D4, F4)
+    { root: 53, third: 57, fifth: 60 }, // F (F3, A3, C4)
+    { root: 60, third: 64, fifth: 67 }, // C (C4, E4, G4)
+  ];
+
+  let arpCounter = 0;
+
+  for (const qe of quantizedEvents) {
+    const event = qe.event || qe.original_event || qe;
+    const cls = (event.class || '').toLowerCase();
+    const timestamp = qe.quantized_timestamp_ms ?? event.timestamp_ms ?? 0;
+
+    const note = {
+      timestamp_ms: timestamp,
+      duration_ms: event.duration_ms || 100,
+      velocity: Math.floor((event.confidence || 0.8) * 127),
+      source_event_id: event.id || null,
+    };
+
+    // Determine active chord (2 bars per chord)
+    const bar = Math.floor(timestamp / msPerBar);
+    const chordIndex = Math.floor((bar % 8) / 2);
+    const currentChord = chords[chordIndex];
+
+    if (cls.includes('bilabial')) {
+      kickEvents.push(note);
+
+      // Bass pattern: Root on downbeats, Fifth on upbeats/offbeats
+      const beatInBar = Math.floor((timestamp % msPerBar) / msPerBeat);
+      const isOffbeat = beatInBar % 2 !== 0;
+      const bassMidi = isOffbeat ? currentChord.fifth - 12 : currentChord.root - 12;
+
+      bassEvents.push({ ...note, duration_ms: 200, midi_note: bassMidi });
+    }
+    else if (cls.includes('hihat')) {
+      hihatEvents.push(note);
+
+      // Rhythmic Puppeteering for Arps
+      if (template === 'arp_drive') {
+        const arpPattern = [currentChord.root + 12, currentChord.third + 12, currentChord.fifth + 12, currentChord.root + 24];
+        const arpMidi = arpPattern[arpCounter % arpPattern.length];
+        arpEvents.push({ ...note, duration_ms: 150, velocity: note.velocity * 0.9, midi_note: arpMidi });
+        arpCounter++;
+      }
+    }
+    else if (cls.includes('click')) {
+      snareEvents.push(note);
+    }
+    else {
+      // Hum -> Pads (Triad)
+      const padDuration = Math.max(400, event.duration_ms || 400);
+      padEvents.push({ ...note, duration_ms: padDuration, velocity: note.velocity * 0.8, midi_note: currentChord.root });
+      padEvents.push({ ...note, duration_ms: padDuration, velocity: note.velocity * 0.8, midi_note: currentChord.third });
+      padEvents.push({ ...note, duration_ms: padDuration, velocity: note.velocity * 0.8, midi_note: currentChord.fifth });
+    }
+  }
+
+  // Expand base pattern into song (Intro/Build/Drop/Outro) — mirrors Rust expand_to_song()
+  const baseDurationMs = totalDurationMs;
+  const cloneToSection = (events: any[], section: number, fade: boolean) =>
+    events.map(e => {
+      const cloned = { ...e, timestamp_ms: e.timestamp_ms + section * baseDurationMs };
+      if (fade) {
+        const progress = e.timestamp_ms / baseDurationMs;
+        cloned.velocity = Math.max(1, Math.floor(e.velocity * Math.max(0.2, 1.0 - progress)));
+      }
+      return cloned;
+    });
+
+  const isKick = (n: string) => n.toUpperCase().includes('KICK');
+  const isHihat = (n: string) => { const u = n.toUpperCase(); return u.includes('HIHAT') || u.includes('HAT'); };
+  const isSnare = (n: string) => { const u = n.toUpperCase(); return u.includes('SNARE') || u.includes('CLAP'); };
+
+  const expandDrum = (name: string, events: any[]) => {
+    const expanded: any[] = [];
+    for (let s = 0; s < 4; s++) {
+      const include = s === 0 ? (isKick(name) || isHihat(name))
+        : s === 1 ? (isKick(name) || isHihat(name) || isSnare(name))
+        : s === 2 ? true : false;
+      if (include) expanded.push(...cloneToSection(events, s, false));
+    }
+    return expanded;
+  };
+
+  const expandBass = (events: any[]) => {
+    const expanded: any[] = [];
+    for (let s = 1; s < 4; s++) expanded.push(...cloneToSection(events, s, s === 3));
+    return expanded;
+  };
+
+  const expandDropOnly = (events: any[]) => cloneToSection(events, 2, false);
+
+  return {
+    drum_lanes: [
+      { name: 'DRUMS_KICK', midi_note: 36, events: expandDrum('DRUMS_KICK', kickEvents) },
+      { name: 'DRUMS_SNARE', midi_note: 38, events: expandDrum('DRUMS_SNARE', snareEvents) },
+      { name: 'DRUMS_HIHAT', midi_note: 42, events: expandDrum('DRUMS_HIHAT', hihatEvents) },
+    ],
+    bass_lane: { name: 'BASS', midi_note: 36, events: expandBass(bassEvents) },
+    pad_lane: { name: 'PADS', midi_note: 48, events: expandDropOnly(padEvents) },
+    arp_lane: { name: 'ARP', midi_note: 60, events: expandDropOnly(arpEvents) },
+    template,
+    total_duration_ms: baseDurationMs * 4,
+    bar_count: barCount * 4,
+  };
+}
+
+/**
+ * Assert that every required (camelCase) arg key is present, throwing on drift.
+ * The generated bindings camelCase multi-word arg keys (`projectId`, `runId`, …),
+ * so this both documents and enforces the contract that hid the earlier snake_case bugs.
+ */
+function requireKeys(args: Record<string, unknown>, keys: string[]): void {
+  for (const k of keys) {
+    if (!(k in args)) {
+      throw new Error(`[Tauri Mock] '${k}' missing — frontend/backend contract drift`);
+    }
+  }
+}
+
+type Handler = (args: Record<string, any>) => unknown;
+
+/**
+ * Command registry. Each handler returns the BARE success value (bindings adds the
+ * `{status:"ok"}` wrapper) or throws to simulate a backend rejection. Keys checked by
+ * `requireKeys` are the camelCase invoke-payload keys emitted by the generated bindings.
+ */
+const HANDLERS: Record<string, Handler> = {
+  greet: (a) => { requireKeys(a, ['name']); return `Hello ${a.name}!`; },
+
+  // --- Project commands (match Rust Project struct) ---
+  list_projects: () => [],
+
+  get_project: (a) => {
+    requireKeys(a, ['id']);
+    return {
+      id: a.id || 'mock-1',
+      name: 'Sample Project',
+      created_at: new Date().toISOString(),
+      input_path: 'mock://audio.wav',
+      input_sha256: 'mock-sha256-hash',
+      duration_ms: 5000,
+    };
+  },
+
+  create_project: (a) => {
+    requireKeys(a, ['input']);
+    // Store audio data so loadAudioData can retrieve it via plugin-fs mock
+    if (a.input?.input_data) {
+      lastProjectAudioData = new Uint8Array(a.input.input_data);
+    }
+    return {
+      id: `mock-${Date.now()}`,
+      name: a.input?.name || 'New Project',
+      created_at: new Date().toISOString(),
+      input_path: 'mock://audio.wav',
+      input_sha256: 'mock-sha256',
+      duration_ms: lastProjectAudioData ? Math.floor((lastProjectAudioData.length - 44) / (44100 * 2) * 1000) : 2000,
+    };
+  },
+
+  // --- Run commands (match Rust Run struct) ---
+  create_run: (a) => {
+    requireKeys(a, ['input']);
+    return {
+      id: `mock-run-${Date.now()}`,
+      project_id: a.input?.project_id || 'mock-1',
+      created_at: new Date().toISOString(),
+      pipeline_version: a.input?.pipeline_version || '0.1.0',
+      theme: a.input?.theme || 'default',
+      bpm: a.input?.bpm || 120,
+      swing: a.input?.swing || 0,
+      quantize_strength: a.input?.quantize_strength || 0.8,
+      b_emphasis: a.input?.b_emphasis || 0.6,
+      status: 'pending',
+    };
+  },
+
+  get_run: (a) => { requireKeys(a, ['id']); return null; },
+
+  list_runs_for_project: (a) => { requireKeys(a, ['projectId']); return []; },
+
+  get_run_with_artifacts: (a) => { requireKeys(a, ['runId']); return null; },
+
+  update_run_status: (a) => { requireKeys(a, ['input']); return null; },
+
+  create_artifact: (a) => {
+    requireKeys(a, ['input']);
+    return {
+      id: `mock-artifact-${Date.now()}`,
+      run_id: a.input?.run_id || 'mock-run-1',
+      kind: a.input?.kind || 'midi',
+      path: 'mock://artifact',
+      sha256: 'mock-sha256',
+      bytes: Array.isArray(a.input?.data) ? a.input.data.length : 0,
+    };
+  },
+
+  // --- Event detection (match Rust EventDetectionResult) ---
+  detect_events: (a) => {
+    requireKeys(a, ['input']);
+    // In mock mode, generate events from stored audio data (saved by create_project)
+    const storedData = lastProjectAudioData ? Array.from(lastProjectAudioData) : [];
+    const events = generateMockEvents(storedData);
+    return { events, total_count: events.length };
+  },
+
+  detect_onsets: (a) => {
+    requireKeys(a, ['input']);
+    return { onsets: [{ timestamp_ms: 500, strength: 0.8 }], total_count: 1 };
+  },
+
+  extract_features: (a) => {
+    requireKeys(a, ['input']);
+    return {
+      spectral_centroid: 1200,
+      zcr: 0.2,
+      low_band_energy: 0.3,
+      mid_band_energy: 0.4,
+      high_band_energy: 0.3,
+      peak_amplitude: 0.7,
+      crest_factor: 3.5,
+    };
+  },
+
+  // --- Groove engine (match Rust types) ---
+  estimate_tempo: (a) => {
+    requireKeys(a, ['input']);
+    return { bpm: 120.0, confidence: 0.85, beat_positions_ms: [] };
+  },
+
+  quantize_events_command: (a) => {
+    requireKeys(a, ['input']);
+    // Return QuantizedEvent[] matching the Rust struct
+    const inputEvents = a.input?.events || [];
+    const bpm = a.input?.bpm || 120;
+    const beatMs = 60000 / bpm;
+    const divisionMs = beatMs / 4; // sixteenth note
+
+    return inputEvents.map((event: any) => {
+      const nearestGrid = Math.round(event.timestamp_ms / divisionMs) * divisionMs;
+      return {
+        original_event: event,
+        original_timestamp_ms: event.timestamp_ms,
+        quantized_timestamp_ms: nearestGrid,
+        snap_delta_ms: nearestGrid - event.timestamp_ms,
+        grid_position: { bar: 0, beat: 0, subdivision: 0 },
+        // Legacy convenience fields consumed by the mock arranger:
+        event_id: event.id,
+        event,
+      };
+    });
+  },
+
+  // --- Arranger (match Rust Arrangement struct) ---
+  arrange_events_command: (a) => {
+    requireKeys(a, ['input']);
+    return buildMockArrangement(a);
+  },
+
+  // --- MIDI export ---
+  export_midi_command: (a) => {
+    requireKeys(a, ['input']);
+    console.log('[Tauri Mock] MIDI export (simulated)');
+    return new Array(100).fill(0);
+  },
+
+  // --- Themes (match Rust ThemeSummary / Theme structs) ---
+  list_themes: () => [
+    { name: 'BLADE RUNNER', description: 'Dark, moody synth theme', bpm_range: [80, 120], root_note: 60, scale_family: 'NaturalMinor' },
+    { name: 'STRANGER THINGS', description: 'Retro 80s synth theme', bpm_range: [100, 140], root_note: 64, scale_family: 'NaturalMinor' },
+  ],
+
+  get_theme: (a) => {
+    requireKeys(a, ['name']);
+    return {
+      name: a.name || 'BLADE RUNNER', bpm_range: [80, 120], root_note: 60, scale_family: 'NaturalMinor',
+      chord_progression: { chords: ['Im', 'VI', 'III', 'VII'], bars_per_chord: 2 },
+      bass_pattern: 'Root', arp_pattern: 'Up158', arp_octave_range: [3, 5],
+      drum_palette: 'SynthwaveDrums', fx_profile: 'GatedReverb', synth_stab_velocity: 100, pad_sustain: true,
+    };
+  },
+
+  list_theme_names: () => ['BLADE RUNNER', 'STRANGER THINGS'],
+
+  // --- Render ---
+  render_preview: (a) => { requireKeys(a, ['input']); return new Array(44100 * 4).fill(0); },
+
+  // --- Calibration ---
+  list_calibration_profiles: () => [],
+
+  get_calibration_profile: (a) => { requireKeys(a, ['id']); return null; },
+
+  create_calibration_profile: (a) => {
+    requireKeys(a, ['input']);
+    return { id: 'mock-cal-1', name: a.input?.name || 'Default', created_at: new Date().toISOString(), profile_json_path: 'mock://profile.json', notes: a.input?.notes ?? null };
+  },
+
+  update_calibration_profile: (a) => { requireKeys(a, ['input']); return null; },
+
+  delete_calibration_profile: (a) => { requireKeys(a, ['id']); return null; },
+
+  // --- Recording ---
+  start_recording: () => null,
+
+  stop_recording: () => new Array(44100 * 2).fill(0),
+
+  is_recording: () => false,
+
+  get_recording_level: () => Math.random() * 0.5,
+
+  // --- Explainability ---
+  save_event_decisions: (a) => { requireKeys(a, ['input']); return null; },
+
+  get_event_decisions: (a) => { requireKeys(a, ['runId']); return []; },
+
+  // --- Plugin-fs commands (called internally by @tauri-apps/plugin-fs) ---
+  'plugin:fs|exists': (a) => {
+    const fileExists = !!(a?.path?.startsWith?.('mock://') && lastProjectAudioData !== null);
+    console.log('[Tauri Mock] plugin:fs|exists returning:', fileExists, 'path:', a?.path, 'hasData:', lastProjectAudioData !== null);
+    return fileExists;
+  },
+
+  'plugin:fs|read_file': () => {
+    console.log('[Tauri Mock] plugin:fs|read_file called, hasData:', lastProjectAudioData !== null, 'dataLen:', lastProjectAudioData?.length);
+    if (lastProjectAudioData) {
+      return lastProjectAudioData;
+    }
+    throw new Error('File not found in mock mode');
+  },
+};
+
+export const invoke = async <T = any>(command: string, args: Record<string, any> = {}): Promise<T> => {
   console.warn(`[Tauri Mock] Command '${command}' called in browser mode.`, args);
 
-  switch (command) {
-    case 'greet':
-      return `Hello ${args?.name || 'World'}!` as T;
-
-    // --- Project commands (match Rust Project struct) ---
-    case 'list_projects':
-      return [] as T;
-
-    case 'get_project':
-      return {
-        id: args?.id || 'mock-1',
-        name: 'Sample Project',
-        created_at: new Date().toISOString(),
-        input_path: 'mock://audio.wav',
-        input_sha256: 'mock-sha256-hash',
-        duration_ms: 5000,
-      } as T;
-
-    case 'create_project': {
-      // Store audio data so loadAudioData can retrieve it via plugin-fs mock
-      if (args?.input?.input_data) {
-        lastProjectAudioData = new Uint8Array(args.input.input_data);
-      }
-      return {
-        id: `mock-${Date.now()}`,
-        name: args?.input?.name || 'New Project',
-        created_at: new Date().toISOString(),
-        input_path: 'mock://audio.wav',
-        input_sha256: 'mock-sha256',
-        duration_ms: lastProjectAudioData ? Math.floor((lastProjectAudioData.length - 44) / (44100 * 2) * 1000) : 2000,
-      } as T;
-    }
-
-    // --- Run commands (match Rust Run struct) ---
-    case 'create_run':
-      return {
-        id: `mock-run-${Date.now()}`,
-        project_id: args?.input?.project_id || 'mock-1',
-        created_at: new Date().toISOString(),
-        pipeline_version: args?.input?.pipeline_version || '0.1.0',
-        theme: args?.input?.theme || 'default',
-        bpm: args?.input?.bpm || 120,
-        swing: args?.input?.swing || 0,
-        quantize_strength: args?.input?.quantize_strength || 0.8,
-        b_emphasis: args?.input?.b_emphasis || 0.6,
-        status: 'pending',
-      } as T;
-
-    case 'get_run':
-      return null as T;
-
-    case 'list_runs_for_project':
-      return [] as T;
-
-    case 'get_run_with_artifacts':
-      return null as T;
-
-    case 'update_run_status':
-      return undefined as T;
-
-    // --- Event detection (match Rust EventDetectionResult) ---
-    case 'detect_events': {
-      // In mock mode, generate events from stored audio data (saved by create_project)
-      const storedData = lastProjectAudioData ? Array.from(lastProjectAudioData) : [];
-      const events = generateMockEvents(storedData);
-      return { events, total_count: events.length } as T;
-    }
-
-    case 'detect_onsets':
-      return { onsets: [{ timestamp_ms: 500, strength: 0.8 }], total_count: 1 } as T;
-
-    case 'extract_features':
-      return {
-        spectral_centroid: 1200,
-        zcr: 0.2,
-        low_band_energy: 0.3,
-        mid_band_energy: 0.4,
-        high_band_energy: 0.3,
-        peak_amplitude: 0.7,
-      } as T;
-
-    // --- Groove engine (match Rust types) ---
-    case 'estimate_tempo':
-      return { bpm: 120.0, confidence: 0.85, beat_positions_ms: [] } as T;
-
-    case 'quantize_events_command': {
-      // Return QuantizedEvent[] matching the Rust struct
-      const inputEvents = args?.input?.events || [];
-      const bpm = args?.input?.bpm || 120;
-      const beatMs = 60000 / bpm;
-      const divisionMs = beatMs / 4; // sixteenth note
-
-      return inputEvents.map((event: any) => {
-        const nearestGrid = Math.round(event.timestamp_ms / divisionMs) * divisionMs;
-        return {
-          original_event: event,
-          event_id: event.id,
-          original_timestamp_ms: event.timestamp_ms,
-          quantized_timestamp_ms: nearestGrid,
-          snap_delta_ms: nearestGrid - event.timestamp_ms,
-          event: event,
-        };
-      }) as T;
-    }
-
-    // --- Arranger (match Rust Arrangement struct) ---
-    case 'arrange_events_command': {
-      const quantizedEvents = args?.input?.events || [];
-      const bpm = args?.input?.bpm || 120;
-      const barCount = args?.input?.bar_count || 4;
-      const totalDurationMs = (barCount * 4 * 60000) / bpm;
-      const template = args?.input?.template || 'synthwave_straight';
-
-      // Sort events into drum lanes by class
-      const kickEvents: any[] = [];
-      const snareEvents: any[] = [];
-      const hihatEvents: any[] = [];
-      const bassEvents: any[] = [];
-      const padEvents: any[] = [];
-      const arpEvents: any[] = [];
-
-      const msPerBeat = 60000 / bpm;
-      const msPerBar = msPerBeat * 4;
-
-      // Mock harmonic progression: Dm -> Bb -> F -> C
-      const chords = [
-        { root: 50, third: 53, fifth: 57 }, // Dm (D3, F3, A3)
-        { root: 58, third: 62, fifth: 65 }, // Bb (Bb3, D4, F4)
-        { root: 53, third: 57, fifth: 60 }, // F (F3, A3, C4)
-        { root: 60, third: 64, fifth: 67 }, // C (C4, E4, G4)
-      ];
-
-      let arpCounter = 0;
-
-      for (const qe of quantizedEvents) {
-        const event = qe.event || qe.original_event || qe;
-        const cls = (event.class || '').toLowerCase();
-        const timestamp = qe.quantized_timestamp_ms ?? event.timestamp_ms ?? 0;
-        
-        const note = {
-          timestamp_ms: timestamp,
-          duration_ms: event.duration_ms || 100,
-          velocity: Math.floor((event.confidence || 0.8) * 127),
-          source_event_id: event.id || null,
-        };
-
-        // Determine active chord (2 bars per chord)
-        const bar = Math.floor(timestamp / msPerBar);
-        const chordIndex = Math.floor((bar % 8) / 2); 
-        const currentChord = chords[chordIndex];
-
-        if (cls.includes('bilabial')) { 
-          kickEvents.push(note); 
-          
-          // Bass pattern: Root on downbeats, Fifth on upbeats/offbeats
-          const beatInBar = Math.floor((timestamp % msPerBar) / msPerBeat);
-          const isOffbeat = beatInBar % 2 !== 0;
-          const bassMidi = isOffbeat ? currentChord.fifth - 12 : currentChord.root - 12;
-          
-          bassEvents.push({ ...note, duration_ms: 200, midi_note: bassMidi }); 
-        }
-        else if (cls.includes('hihat')) {
-          hihatEvents.push(note);
-          
-          // Rhythmic Puppeteering for Arps
-          if (template === 'arp_drive') {
-            const arpPattern = [currentChord.root + 12, currentChord.third + 12, currentChord.fifth + 12, currentChord.root + 24];
-            const arpMidi = arpPattern[arpCounter % arpPattern.length];
-            arpEvents.push({ ...note, duration_ms: 150, velocity: note.velocity * 0.9, midi_note: arpMidi });
-            arpCounter++;
-          }
-        }
-        else if (cls.includes('click')) {
-          snareEvents.push(note);
-        }
-        else {
-          // Hum -> Pads (Triad)
-          const padDuration = Math.max(400, event.duration_ms || 400);
-          padEvents.push({ ...note, duration_ms: padDuration, velocity: note.velocity * 0.8, midi_note: currentChord.root });
-          padEvents.push({ ...note, duration_ms: padDuration, velocity: note.velocity * 0.8, midi_note: currentChord.third });
-          padEvents.push({ ...note, duration_ms: padDuration, velocity: note.velocity * 0.8, midi_note: currentChord.fifth });
-        }
-      }
-
-      // Expand base pattern into song (Intro/Build/Drop/Outro) — mirrors Rust expand_to_song()
-      const baseDurationMs = totalDurationMs;
-      const cloneToSection = (events: any[], section: number, fade: boolean) =>
-        events.map(e => {
-          const cloned = { ...e, timestamp_ms: e.timestamp_ms + section * baseDurationMs };
-          if (fade) {
-            const progress = e.timestamp_ms / baseDurationMs;
-            cloned.velocity = Math.max(1, Math.floor(e.velocity * Math.max(0.2, 1.0 - progress)));
-          }
-          return cloned;
-        });
-
-      const isKick = (n: string) => n.toUpperCase().includes('KICK');
-      const isHihat = (n: string) => { const u = n.toUpperCase(); return u.includes('HIHAT') || u.includes('HAT'); };
-      const isSnare = (n: string) => { const u = n.toUpperCase(); return u.includes('SNARE') || u.includes('CLAP'); };
-
-      const expandDrum = (name: string, events: any[]) => {
-        const expanded: any[] = [];
-        for (let s = 0; s < 4; s++) {
-          const include = s === 0 ? (isKick(name) || isHihat(name))
-            : s === 1 ? (isKick(name) || isHihat(name) || isSnare(name))
-            : s === 2 ? true : false;
-          if (include) expanded.push(...cloneToSection(events, s, false));
-        }
-        return expanded;
-      };
-
-      const expandBass = (events: any[]) => {
-        const expanded: any[] = [];
-        for (let s = 1; s < 4; s++) expanded.push(...cloneToSection(events, s, s === 3));
-        return expanded;
-      };
-
-      const expandDropOnly = (events: any[]) => cloneToSection(events, 2, false);
-
-      return {
-        drum_lanes: [
-          { name: 'DRUMS_KICK', midi_note: 36, events: expandDrum('DRUMS_KICK', kickEvents) },
-          { name: 'DRUMS_SNARE', midi_note: 38, events: expandDrum('DRUMS_SNARE', snareEvents) },
-          { name: 'DRUMS_HIHAT', midi_note: 42, events: expandDrum('DRUMS_HIHAT', hihatEvents) },
-        ],
-        bass_lane: { name: 'BASS', midi_note: 36, events: expandBass(bassEvents) },
-        pad_lane: { name: 'PADS', midi_note: 48, events: expandDropOnly(padEvents) },
-        arp_lane: { name: 'ARP', midi_note: 60, events: expandDropOnly(arpEvents) },
-        template,
-        total_duration_ms: baseDurationMs * 4,
-        bar_count: barCount * 4,
-      } as T;
-    }
-
-    // --- Explainability ---
-    case 'save_event_decisions':
-      return undefined as T;
-
-    case 'get_event_decisions':
-      return [] as T;
-
-    // --- MIDI export ---
-    case 'export_midi_command':
-      console.log('[Tauri Mock] MIDI export (simulated)');
-      return new Array(100).fill(0) as T;
-
-    // --- Themes (match Rust ThemeSummary / Theme structs) ---
-    case 'list_themes':
-      return [
-        { name: 'BLADE RUNNER', description: 'Dark, moody synth theme', bpm_range: [80, 120], root_note: 60, scale_family: 'minor' },
-        { name: 'STRANGER THINGS', description: 'Retro 80s synth theme', bpm_range: [100, 140], root_note: 64, scale_family: 'minor' },
-      ] as T;
-
-    case 'get_theme':
-      return {
-        name: args?.name || 'BLADE RUNNER', bpm_range: [80, 120], root_note: 60, scale_family: 'minor',
-        chord_progression: { chords: ['Cm', 'Ab', 'Eb', 'Bb'], bars_per_chord: 2 },
-        bass_pattern: 'octave_pulse', arp_pattern: 'up_down', arp_octave_range: [3, 5],
-        drum_palette: 'electronic', fx_profile: 'gated_reverb', synth_stab_velocity: 100, pad_sustain: true,
-      } as T;
-
-    case 'list_theme_names':
-      return ['BLADE RUNNER', 'STRANGER THINGS'] as T;
-
-    // --- Calibration ---
-    case 'list_calibration_profiles':
-      return [] as T;
-
-    case 'get_calibration_profile':
-      return null as T;
-
-    case 'create_calibration_profile':
-      return { id: 'mock-cal-1', name: args?.input?.name || 'Default', created_at: new Date().toISOString(), profile_json_path: 'mock://profile.json' } as T;
-
-    case 'update_calibration_profile':
-    case 'delete_calibration_profile':
-      return undefined as T;
-
-    // --- Recording ---
-    case 'start_recording':
-      return undefined as T;
-
-    case 'stop_recording':
-      return new Array(44100 * 2).fill(0) as T;
-
-    case 'is_recording':
-      return false as T;
-
-    case 'get_recording_level':
-      return (Math.random() * 0.5) as T;
-
-    // --- Render ---
-    case 'render_preview':
-      return new Array(44100 * 4).fill(0) as T;
-
-    // --- Plugin-fs commands (called internally by @tauri-apps/plugin-fs) ---
-    case 'plugin:fs|exists': {
-      const fileExists = !!(args?.path?.startsWith?.('mock://') && lastProjectAudioData !== null);
-      console.log('[Tauri Mock] plugin:fs|exists returning:', fileExists, 'path:', args?.path, 'hasData:', lastProjectAudioData !== null);
-      return fileExists as T;
-    }
-
-    case 'plugin:fs|read_file': {
-      console.log('[Tauri Mock] plugin:fs|read_file called, hasData:', lastProjectAudioData !== null, 'dataLen:', lastProjectAudioData?.length);
-      if (lastProjectAudioData) {
-        return lastProjectAudioData as T;
-      }
-      throw new Error('File not found in mock mode');
-    }
-
-    default:
-      console.error(`[Tauri Mock] Unknown command: ${command}`);
-      throw new Error(`Command '${command}' not implemented in browser mock mode`);
+  const handler = HANDLERS[command];
+  if (!handler) {
+    // Unknown command == contract drift; mirror TAURI_INVOKE rejection.
+    console.error(`[Tauri Mock] Unknown command: ${command}`);
+    throw new Error(`[Tauri Mock] Unknown command '${command}'`);
   }
+  return handler(args) as T;
 };
 
 export interface TauriAPI {

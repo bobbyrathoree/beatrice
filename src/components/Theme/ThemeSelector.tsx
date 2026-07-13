@@ -1,33 +1,12 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { invoke } from '@tauri-apps/api/core';
+import { commands, unwrap } from '../../types/ipc';
 
-// Theme type definitions matching Rust types
-export interface ThemeSummary {
-  name: string;
-  description: string;
-  bpm_range: [number, number];
-  root_note: number;
-  scale_family: string;
-}
-
-export interface Theme {
-  name: string;
-  bpm_range: [number, number];
-  root_note: number;
-  scale_family: string;
-  chord_progression: {
-    chords: string[];
-    bars_per_chord: number;
-  };
-  bass_pattern: string;
-  arp_pattern: string;
-  arp_octave_range: [number, number];
-  drum_palette: string;
-  fx_profile: string;
-  synth_stab_velocity: number;
-  pad_sustain: boolean;
-}
+// Theme types come from the generated bindings (single source of truth).
+// Re-exported here so existing consumers (App.tsx, PlaybackControls) keep their
+// `import { type Theme } from './Theme/ThemeSelector'` paths.
+export type { Theme, ThemeSummary } from '../../types/ipc';
+import type { Theme, ThemeSummary } from '../../types/ipc';
 
 interface ThemeSelectorProps {
   onThemeChange: (theme: Theme | null) => void;
@@ -49,7 +28,7 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
     try {
       setLoading(true);
       setError(null);
-      const themesData = await invoke<ThemeSummary[]>('list_themes');
+      const themesData = unwrap(await commands.listThemes());
       setThemes(themesData);
       
       // If no theme is active, automatically select the first one to avoid unselected state
@@ -71,7 +50,7 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
         return; // Prevent deselecting, let's keep one always selected
       }
 
-      const theme = await invoke<Theme | null>('get_theme', { name: themeName });
+      const theme = unwrap(await commands.getTheme(themeName));
       if (theme) {
         onThemeChange(theme);
       }

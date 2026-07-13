@@ -1,6 +1,14 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { invoke } from "@tauri-apps/api/core";
+import { commands, unwrap, formatIpcError } from "./types/ipc";
+import type {
+  EventData,
+  QuantizedEvent,
+  Arrangement,
+  TempoEstimate,
+  AssignedNote,
+  DrumLane,
+} from "./types/ipc";
 import { useStore } from "./store/useStore";
 import { DropZone } from "./components/AudioInput/DropZone";
 import { Recorder } from "./components/AudioInput/Recorder";
@@ -34,46 +42,14 @@ function mapThemeToTemplate(theme: Theme | null): string {
   return "synthwave_straight";
 }
 
-// Matches Rust EventData structure from commands.rs
-interface EventData {
-  id: string;
-  timestamp_ms: number;
-  duration_ms: number;
-  class: string;
-  confidence: number;
-  features: {
-    spectral_centroid: number;
-    zcr: number;
-    low_band_energy: number;
-    mid_band_energy: number;
-    high_band_energy: number;
-    peak_amplitude: number;
-  };
-}
-
-// Matches Rust QuantizedEvent structure
-interface QuantizedEvent {
-  event_id: string;
-  original_timestamp_ms: number;
-  quantized_timestamp_ms: number;
-  snap_delta_ms: number;
-  event: EventData;
-}
-
-// Matches Rust Arrangement structure
-interface Arrangement {
-  tracks: Array<{
-    name: string;
-    events: QuantizedEvent[];
-  }>;
-}
-
+// Full result of a pipeline run, shared with the results-screen components.
+// `tempo` replaces the previous bare `bpm` field; `duration_ms` comes from the project.
 interface PipelineResult {
   events: EventData[];
-  arrangement: Arrangement;
   quantized_events: QuantizedEvent[];
-  duration_ms?: number;
-  bpm?: number;
+  arrangement: Arrangement;
+  tempo: TempoEstimate;
+  duration_ms: number;
 }
 
 function App() {
@@ -228,16 +204,17 @@ function App() {
     try {
       // Step 1: Detect events (Rust reads from disk via file_path)
       setProcessingProgress(0.1);
-      const eventResult = await invoke<{ events: EventData[] }>("detect_events", {
-        input: {
+      const eventResult = await commands
+        .detectEvents({
           file_path: _project.input_path,
           run_id: null,
           use_calibration: false,
           calibration_profile_id: null,
-        },
-      }).catch(err => {
-        throw new Error(`Event detection failed: ${err instanceof Error ? err.message : String(err)}`);
-      });
+        })
+        .then(unwrap)
+        .catch((err) => {
+          throw new Error(`Event detection failed: ${formatIpcError(err)}`);
+        });
 
       if (!eventResult?.events?.length) {
         throw new Error("No events detected in audio. Try recording a longer or louder sample.");
@@ -246,13 +223,12 @@ function App() {
       setProcessingProgress(0.4);
 
       // Step 2: Estimate tempo
-      const tempoResult = await invoke<{ bpm: number }>("estimate_tempo", {
-        input: {
-          file_path: _project.input_path,
-        },
-      }).catch(err => {
-        throw new Error(`Tempo estimation failed: ${err instanceof Error ? err.message : String(err)}`);
-      });
+      const tempoResult = await commands
+        .estimateTempo({ file_path: _project.input_path })
+        .then(unwrap)
+        .catch((err) => {
+          throw new Error(`Tempo estimation failed: ${formatIpcError(err)}`);
+        });
 
       setProcessingProgress(0.6);
 
@@ -263,8 +239,8 @@ function App() {
       }));
 
       // Step 3: Quantize events
-      const quantizedResult = await invoke<QuantizedEvent[]>("quantize_events_command", {
-        input: {
+      const quantizedResult = await commands
+        .quantizeEventsCommand({
           events: eventResult.events,
           bpm: tempoResult.bpm,
           time_signature: gridSettings.time_signature,
@@ -274,15 +250,16 @@ function App() {
           bar_count: gridSettings.bar_count,
           quantize_strength: quantizeSettings.strength,
           lookahead_ms: quantizeSettings.lookahead_ms,
-        },
-      }).catch(err => {
-        throw new Error(`Event quantization failed: ${err instanceof Error ? err.message : String(err)}`);
-      });
+        })
+        .then(unwrap)
+        .catch((err) => {
+          throw new Error(`Event quantization failed: ${formatIpcError(err)}`);
+        });
 
       setProcessingProgress(0.8);
       // Step 4: Arrange events
-      const arrangement = await invoke<Arrangement>("arrange_events_command", {
-        input: {
+      const arrangement = await commands
+        .arrangeEventsCommand({
           events: quantizedResult,
           template: mapThemeToTemplate(selectedTheme),
           theme_name: selectedTheme?.name || "BLADE RUNNER",
@@ -293,19 +270,21 @@ function App() {
           swing_amount: gridSettings.swing_amount,
           bar_count: gridSettings.bar_count,
           b_emphasis: pipelineParams.bEmphasis,
-        },
-      }).catch(err => {
-        throw new Error(`Event arrangement failed: ${err instanceof Error ? err.message : String(err)}`);
-      });
+        })
+        .then(unwrap)
+        .catch((err) => {
+          throw new Error(`Event arrangement failed: ${formatIpcError(err)}`);
+        });
 
       setProcessingProgress(1.0);
 
-      // Store results with BPM from tempo estimation
+      // Store results with tempo estimate + true project duration
       setPipelineResult({
         events: eventResult.events,
         quantized_events: quantizedResult,
         arrangement,
-        bpm: tempoResult.bpm,
+        tempo: tempoResult,
+        duration_ms: _project.duration_ms,
       });
 
       // Transition to results
@@ -318,8 +297,8 @@ function App() {
         const projectId = _project.id;
         if (projectId) {
           // Step 5: Create run record
-          const run = await invoke<Run>("create_run", {
-            input: {
+          const run = unwrap(
+            await commands.createRun({
               project_id: projectId,
               pipeline_version: "0.1.0",
               theme: selectedTheme?.name || "default",
@@ -327,23 +306,23 @@ function App() {
               swing: gridSettings.swing_amount,
               quantize_strength: quantizeSettings.strength,
               b_emphasis: pipelineParams.bEmphasis,
-            },
-          });
+            })
+          );
 
           // Step 6: Mark run as complete
-          await invoke("update_run_status", {
-            input: { run_id: run.id, status: "complete" },
-          });
+          unwrap(
+            await commands.updateRunStatus({ run_id: run.id, status: "complete" })
+          );
 
           // Step 7: Save event decisions for explainability
-          await invoke("save_event_decisions", {
-            input: {
+          unwrap(
+            await commands.saveEventDecisions({
               run_id: run.id,
               events: eventResult.events,
               quantized_events: quantizedResult,
               arrangement,
-            },
-          });
+            })
+          );
 
           // Store current run in Zustand
           setCurrentRun({ ...run, status: "complete" });
@@ -357,7 +336,7 @@ function App() {
     } catch (err) {
       console.error("Pipeline failed:", err);
       setIsPipelineRunning(false);
-      handleError(err instanceof Error ? err.message : "Pipeline processing failed");
+      handleError(formatIpcError(err));
       setState("input");
       setAudioData(null);
     }
@@ -375,8 +354,8 @@ function App() {
       const currentBpm = gridSettings.bpm;
 
       // Re-quantize with current settings
-      const quantizedResult = await invoke<QuantizedEvent[]>("quantize_events_command", {
-        input: {
+      const quantizedResult = unwrap(
+        await commands.quantizeEventsCommand({
           events: pipelineResult.events,
           bpm: currentBpm,
           time_signature: gridSettings.time_signature,
@@ -386,12 +365,12 @@ function App() {
           bar_count: gridSettings.bar_count,
           quantize_strength: quantizeSettings.strength,
           lookahead_ms: quantizeSettings.lookahead_ms,
-        },
-      });
+        })
+      );
 
       // Re-arrange with current template and settings
-      const arrangement = await invoke<Arrangement>("arrange_events_command", {
-        input: {
+      const arrangement = unwrap(
+        await commands.arrangeEventsCommand({
           events: quantizedResult,
           template: mapThemeToTemplate(selectedTheme),
           theme_name: selectedTheme?.name || "BLADE RUNNER",
@@ -402,8 +381,8 @@ function App() {
           swing_amount: gridSettings.swing_amount,
           bar_count: gridSettings.bar_count,
           b_emphasis: pipelineParams.bEmphasis,
-        },
-      });
+        })
+      );
       setPipelineResult((prev) => {
         if (!prev) return prev;
         return {
@@ -414,6 +393,7 @@ function App() {
       });
     } catch (err) {
       console.error("Re-arrange failed:", err);
+      setError(formatIpcError(err));
     } finally {
       setIsReArranging(false);
     }
@@ -496,15 +476,13 @@ function App() {
 
   const handleSessionSelect = useCallback(async (projectSummary: ProjectSummary) => {
     try {
-      const { getTauriAPI } = await import("./utils/tauri-mock");
-      const tauri = getTauriAPI();
-      const fullProject = await tauri.invoke("get_project", { id: projectSummary.id });
+      const fullProject = unwrap(await commands.getProject(projectSummary.id));
 
       if (fullProject) {
         await handleProjectCreated(fullProject as Project);
       }
     } catch (err) {
-      handleError(`Failed to load session: ${err instanceof Error ? err.message : String(err)}`);
+      handleError(`Failed to load session: ${formatIpcError(err)}`);
     }
   }, [handleError]);
 
@@ -512,7 +490,7 @@ function App() {
   const handleRunSelect = useCallback(async (run: Run, projectId: string) => {
     try {
       // Load the project
-      const fullProject = await invoke<Project | null>("get_project", { id: projectId });
+      const fullProject = unwrap(await commands.getProject(projectId));
       if (!fullProject) {
         handleError("Project not found");
         return;
@@ -545,41 +523,59 @@ function App() {
 
       // Try to load cached event decisions
       try {
-        const decisions = await invoke<EventDecision[]>("get_event_decisions", {
-          run_id: run.id,
-        });
+        const decisions = unwrap(await commands.getEventDecisions(run.id));
 
         if (decisions && decisions.length > 0) {
-          // Reconstruct pipeline result from cached decisions
+          // Reconstruct the detected events from cached decisions. EventDecision
+          // exposes the ORIGINAL timing as `timestamp_ms` (there is no
+          // `original_timestamp_ms` field).
           const events: EventData[] = decisions.map((d) => ({
             id: d.event_id,
-            timestamp_ms: d.original_timestamp_ms,
-            duration_ms: 50, // Default duration for reconstructed events
+            timestamp_ms: d.timestamp_ms,
+            duration_ms: d.duration_ms || 50,
             class: d.class,
             confidence: d.confidence,
             features: d.features,
           }));
 
-          const quantized: QuantizedEvent[] = decisions.map((d) => ({
-            event_id: d.event_id,
-            original_timestamp_ms: d.original_timestamp_ms,
-            quantized_timestamp_ms: d.quantized_timestamp_ms,
-            snap_delta_ms: d.snap_delta_ms,
-            event: {
-              id: d.event_id,
-              timestamp_ms: d.original_timestamp_ms,
-              duration_ms: 50,
-              class: d.class,
-              confidence: d.confidence,
-              features: d.features,
-            },
-          }));
+          // Rebuild quantized events + arrangement honestly from the saved params,
+          // rather than faking an empty arrangement. Anything not persisted uses the
+          // current grid/quantize defaults (matching the normal pipeline path).
+          const quantized = unwrap(
+            await commands.quantizeEventsCommand({
+              events,
+              bpm: run.bpm,
+              time_signature: gridSettings.time_signature,
+              division: gridSettings.division,
+              feel: gridSettings.feel,
+              swing_amount: run.swing,
+              bar_count: gridSettings.bar_count,
+              quantize_strength: run.quantize_strength,
+              lookahead_ms: quantizeSettings.lookahead_ms,
+            })
+          );
+
+          const arrangement = unwrap(
+            await commands.arrangeEventsCommand({
+              events: quantized,
+              template: mapThemeToTemplate(selectedTheme),
+              theme_name: run.theme,
+              bpm: run.bpm,
+              time_signature: gridSettings.time_signature,
+              division: gridSettings.division,
+              feel: gridSettings.feel,
+              swing_amount: run.swing,
+              bar_count: gridSettings.bar_count,
+              b_emphasis: run.b_emphasis,
+            })
+          );
 
           setPipelineResult({
             events,
             quantized_events: quantized,
-            arrangement: { tracks: [] } as unknown as Arrangement,
-            bpm: run.bpm,
+            arrangement,
+            tempo: { bpm: run.bpm, confidence: 0, beat_positions_ms: [] },
+            duration_ms: fullProject.duration_ms,
           });
 
           // Load audio for waveform display
@@ -612,8 +608,9 @@ function App() {
 
       await runPipeline(fullProject);
     } catch (err) {
-      handleError(`Failed to load run: ${err instanceof Error ? err.message : String(err)}`);
+      handleError(`Failed to load run: ${formatIpcError(err)}`);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleError, setCurrentProject, setCurrentRun, setPipelineParams, setCurrentScreen]);
 
   // Convert pipeline events to EventDecision format for explainability
@@ -642,7 +639,7 @@ function App() {
       const arrangement = pipelineResult.arrangement;
 
       // Helper to check lanes
-      const checkLane = (lane: any) => {
+      const checkLane = (lane: DrumLane | null) => {
         if (!lane || !Array.isArray(lane.events)) return;
         for (const note of lane.events) {
           if (note.source_event_id === event.id) {
@@ -870,14 +867,14 @@ function App() {
               {/* Waveform Display */}
               <Waveform
                 audioData={audioData || undefined}
-                duration={pipelineResult?.duration_ms || 10000}
+                duration={pipelineResult?.duration_ms ?? 10000}
                 events={eventDecisions}
               />
 
               {/* B-Sound Markers */}
               <BeatMarkers
                 events={eventDecisions}
-                duration={pipelineResult?.duration_ms || 10000}
+                duration={pipelineResult?.duration_ms ?? 10000}
                 onMarkerClick={(event) => setSelectedEventId(event.event_id)}
               />
 
@@ -907,7 +904,6 @@ function App() {
                     arrangement={pipelineResult.arrangement}
                     currentTime={currentTime}
                     isPlaying={isPlaying}
-                    themeName={selectedTheme?.name}
                   />
                 </motion.div>
               )}

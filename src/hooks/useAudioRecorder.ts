@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { commands, unwrap } from '../types/ipc';
 
 export interface AudioRecorderState {
   isRecording: boolean;
@@ -36,7 +36,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const startRecording = useCallback(async () => {
     try {
       // Call Rust backend to start recording
-      await invoke('start_recording');
+      unwrap(await commands.startRecording());
 
       // Start timer
       startTimeRef.current = Date.now();
@@ -58,7 +58,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       // Poll audio level from Rust
       levelIntervalRef.current = window.setInterval(async () => {
         try {
-          const level = await invoke<number>('get_recording_level');
+          const level = unwrap(await commands.getRecordingLevel());
           levelRef.current = level;
         } catch {
           // Ignore level polling errors
@@ -107,7 +107,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       }
 
       // Call Rust backend to stop recording and get WAV data
-      const wavBytes = await invoke<number[]>('stop_recording');
+      const wavBytes = unwrap(await commands.stopRecording());
 
       // Convert number array to Uint8Array
       const audioData = new Uint8Array(wavBytes);

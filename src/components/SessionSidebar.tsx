@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { invoke } from "@tauri-apps/api/core";
+import { commands, unwrap } from "../types/ipc";
 import { useProjects, type ProjectSummary } from "../hooks/useProjects";
 import { useStore } from "../store/useStore";
 import type { Run } from "../store/useStore";
@@ -35,9 +35,7 @@ export function SessionSidebar({ onSessionSelect, onRunSelect, refreshKey }: Ses
   const loadRunsForProject = useCallback(async (projectId: string) => {
     setLoadingRuns(projectId);
     try {
-      const runs = await invoke<Run[]>("list_runs_for_project", {
-        project_id: projectId,
-      });
+      const runs = unwrap(await commands.listRunsForProject(projectId));
       setProjectRuns((prev) => ({ ...prev, [projectId]: runs }));
     } catch (err) {
       console.error("Failed to load runs for project:", err);

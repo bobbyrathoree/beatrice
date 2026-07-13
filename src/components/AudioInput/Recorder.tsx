@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { invoke } from '@tauri-apps/api/core';
+import { commands, unwrap } from '../../types/ipc';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import type { Project } from '../../store/useStore';
 
@@ -80,12 +80,12 @@ export function Recorder({ onProjectCreated, onError, onCancel }: RecorderProps)
       try {
         // audioData is already WAV bytes from Rust backend
         // Create project via Tauri command
-        const project = await invoke<Project>('create_project', {
-          input: {
+        const project = unwrap(
+          await commands.createProject({
             name: `Recording ${new Date().toISOString().split('T')[0]}`,
             input_data: Array.from(audioData),
-          },
-        });
+          })
+        );
 
         handleProjectCreated(project);
       } catch (err) {
