@@ -9,7 +9,6 @@ mod commands;
 pub mod events;
 pub mod groove;
 mod pipeline;
-mod render;
 mod state;
 pub mod themes;
 
@@ -46,7 +45,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         commands::list_themes,
         commands::get_theme,
         commands::list_theme_names,
-        commands::render_preview,
         commands::start_recording,
         commands::stop_recording,
         commands::is_recording,

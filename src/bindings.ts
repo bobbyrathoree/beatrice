@@ -232,20 +232,6 @@ async listThemeNames() : Promise<Result<string[], CommandError>> {
 }
 },
 /**
- * Render a preview of an arrangement to WAV audio
- * 
- * Note: This is a placeholder implementation that returns silent audio.
- * Full audio synthesis will be implemented in a future update.
- */
-async renderPreview(input: RenderPreviewInput) : Promise<Result<number[], CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("render_preview", { input }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Start audio recording from the default input device
  */
 async startRecording() : Promise<Result<null, CommandError>> {
@@ -585,10 +571,6 @@ beat: number;
  * Subdivision within beat (0-indexed)
  */
 subdivision: number }
-/**
- * Mixer settings for final audio rendering
- */
-export type MixerSettings = { kick_volume: number; snare_volume: number; hihat_volume: number; bass_volume: number; pad_volume: number; arp_volume: number; master_volume: number; sidechain_intensity: number }
 export type OnsetData = { timestamp_ms: number; strength: number }
 export type OnsetDetectionResult = { onsets: OnsetData[]; total_count: number }
 export type Project = { id: string; created_at: string; name: string; input_path: string; input_sha256: string; duration_ms: number }
@@ -618,7 +600,6 @@ snap_delta_ms: number;
  * Position on the musical grid
  */
 grid_position: GridPosition }
-export type RenderPreviewInput = { arrangement: Arrangement; theme_name: string; duration_seconds: number; sample_rate: number | null; mixer_settings: MixerSettings | null }
 export type Run = { id: string; project_id: string; created_at: string; pipeline_version: string; theme: string; bpm: number; swing: number; quantize_strength: number; b_emphasis: number; status: RunStatus }
 export type RunStatus = "pending" | "processing" | "complete" | "failed"
 export type RunWithArtifacts = { run: Run; artifacts: Artifact[] }

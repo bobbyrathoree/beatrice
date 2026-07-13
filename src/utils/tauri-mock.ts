@@ -386,9 +386,6 @@ const HANDLERS: Record<string, Handler> = {
 
   list_theme_names: () => ['BLADE RUNNER', 'STRANGER THINGS'],
 
-  // --- Render ---
-  render_preview: (a) => { requireKeys(a, ['input']); return new Array(44100 * 4).fill(0); },
-
   // --- Calibration ---
   list_calibration_profiles: () => [],
 

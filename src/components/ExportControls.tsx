@@ -4,6 +4,8 @@ import { commands, unwrap, formatIpcError } from '../types/ipc';
 import type { Arrangement } from '../types/ipc';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
+import { renderArrangementToWav } from '../audio/renderWav';
+import { isTauriAvailable } from '../utils/tauri-mock';
 
 interface ExportControlsProps {
   arrangement: Arrangement;
@@ -94,36 +96,37 @@ export function ExportControls({
       setWavStatus('exporting');
       setError(null);
 
-      // Calculate duration from arrangement
-      const durationSeconds = (gridSettings.bar_count * 4 * 60) / gridSettings.bpm;
+      // Render audio in the frontend via OfflineAudioContext, using the SAME
+      // synthesis code the user hears on PLAY. Length comes from the arrangement
+      // itself (song structure is baked into total_duration_ms), not a bar/bpm guess.
+      const wavBytes = await renderArrangementToWav(arrangement);
 
-      // Call backend to render preview
-      const wavBytes = unwrap(
-        await commands.renderPreview({
-          arrangement,
-          theme_name: themeName,
-          duration_seconds: durationSeconds,
-          sample_rate: 44100,
-          mixer_settings: null, // Use defaults
-        })
-      );
+      if (isTauriAvailable()) {
+        // Native: prompt for a save location and write the file to disk.
+        const filePath = await save({
+          defaultPath: `beatrice_${themeName}_${Date.now()}.wav`,
+          filters: [{
+            name: 'WAV Audio',
+            extensions: ['wav'],
+          }],
+        });
 
-      // Prompt user for save location
-      const filePath = await save({
-        defaultPath: `beatrice_${themeName}_${Date.now()}.wav`,
-        filters: [{
-          name: 'WAV Audio',
-          extensions: ['wav'],
-        }],
-      });
+        if (!filePath) {
+          setWavStatus('idle');
+          return;
+        }
 
-      if (!filePath) {
-        setWavStatus('idle');
-        return;
+        await writeFile(filePath, wavBytes);
+      } else {
+        // Browser/demo: trigger a Blob download.
+        const blob = new Blob([wavBytes], { type: 'audio/wav' });
+        const a = Object.assign(document.createElement('a'), {
+          href: URL.createObjectURL(blob),
+          download: `beatrice_${themeName}.wav`,
+        });
+        a.click();
+        URL.revokeObjectURL(a.href);
       }
-
-      // Write file
-      await writeFile(filePath, new Uint8Array(wavBytes));
 
       setWavStatus('success');
       setTimeout(() => setWavStatus('idle'), 3000);
