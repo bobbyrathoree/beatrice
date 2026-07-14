@@ -91,6 +91,14 @@ pub(crate) fn run_migrations(conn: &Connection) -> DbResult<()> {
         )?;
     }
 
+    if current_version < 2 {
+        migration_v2(conn)?;
+        conn.execute(
+            "INSERT INTO schema_migrations (version) VALUES (?1)",
+            [2],
+        )?;
+    }
+
     Ok(())
 }
 
@@ -177,6 +185,19 @@ fn migration_v1(conn: &Connection) -> DbResult<()> {
     // Create index on created_at
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_calibration_profiles_created_at ON calibration_profiles(created_at DESC)",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn migration_v2(conn: &Connection) -> DbResult<()> {
+    // Persist the tempo phase offset per run so replaying a saved run
+    // reproduces the exact arrangement the user originally heard (anacrusis /
+    // pickup material anchors quantization + chords to this offset). Existing
+    // rows default to 0, matching the pre-persistence replay behaviour.
+    conn.execute(
+        "ALTER TABLE runs ADD COLUMN phase_offset_ms REAL NOT NULL DEFAULT 0",
         [],
     )?;
 

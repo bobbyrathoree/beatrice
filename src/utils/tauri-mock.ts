@@ -277,6 +277,7 @@ const HANDLERS: Record<string, Handler> = {
       swing: a.input?.swing || 0,
       quantize_strength: a.input?.quantize_strength || 0.8,
       b_emphasis: a.input?.b_emphasis || 0.6,
+      phase_offset_ms: a.input?.phase_offset_ms ?? 0,
       status: 'pending',
     };
   },

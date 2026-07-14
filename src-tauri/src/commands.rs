@@ -111,6 +111,10 @@ pub struct CreateRunInput {
     pub swing: f64,
     pub quantize_strength: f64,
     pub b_emphasis: f64,
+    /// Tempo phase offset (ms). Optional for backward compatibility; defaults
+    /// to 0 so callers that predate phase persistence keep working.
+    #[serde(default)]
+    pub phase_offset_ms: Option<f64>,
 }
 
 #[tauri::command]
@@ -127,6 +131,7 @@ pub fn create_run(db: State<'_, DbConnection>, input: CreateRunInput) -> Command
         input.swing,
         input.quantize_strength,
         input.b_emphasis,
+        input.phase_offset_ms.unwrap_or(0.0),
     )
     .map_err(CommandError::from)?;
 

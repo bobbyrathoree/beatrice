@@ -22,6 +22,9 @@ export interface Run {
   swing: number;
   quantize_strength: number;
   b_emphasis: number;
+  // Tempo phase offset (ms) persisted at creation so replaying a run anchors
+  // quantization/chords exactly as the user first heard it.
+  phase_offset_ms: number;
   status: 'pending' | 'processing' | 'complete' | 'failed';
 }
 

@@ -308,6 +308,9 @@ function App() {
               swing: gridSettings.swing_amount,
               quantize_strength: quantizeSettings.strength,
               b_emphasis: pipelineParams.bEmphasis,
+              // Persist the tempo phase so replaying this run anchors
+              // quantization/chords exactly as the user first heard it.
+              phase_offset_ms: tempoResult.phase_offset_ms,
             })
           );
 
@@ -556,8 +559,9 @@ function App() {
               bar_count: gridSettings.bar_count,
               quantize_strength: run.quantize_strength,
               lookahead_ms: quantizeSettings.lookahead_ms,
-              // Phase offset isn't persisted per-run; replay anchors at t=0.
-              phase_offset_ms: 0,
+              // Use the phase persisted with the run so replay reproduces the
+              // original arrangement (same input → same output).
+              phase_offset_ms: run.phase_offset_ms,
             })
           );
 
@@ -573,7 +577,7 @@ function App() {
               swing_amount: run.swing,
               bar_count: gridSettings.bar_count,
               b_emphasis: run.b_emphasis,
-              phase_offset_ms: 0,
+              phase_offset_ms: run.phase_offset_ms,
             })
           );
 
@@ -581,7 +585,12 @@ function App() {
             events,
             quantized_events: quantized,
             arrangement,
-            tempo: { bpm: run.bpm, confidence: 0, beat_positions_ms: [], phase_offset_ms: 0 },
+            tempo: {
+              bpm: run.bpm,
+              confidence: 0,
+              beat_positions_ms: [],
+              phase_offset_ms: run.phase_offset_ms,
+            },
             duration_ms: fullProject.duration_ms,
           });
 

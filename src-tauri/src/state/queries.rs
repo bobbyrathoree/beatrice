@@ -132,6 +132,7 @@ pub fn create_run(
     swing: f64,
     quantize_strength: f64,
     b_emphasis: f64,
+    phase_offset_ms: f64,
 ) -> DbResult<Run> {
     let run = Run {
         id: Uuid::new_v4(),
@@ -143,13 +144,14 @@ pub fn create_run(
         swing,
         quantize_strength,
         b_emphasis,
+        phase_offset_ms,
         status: RunStatus::Pending,
     };
 
     let conn = db.lock();
     conn.execute(
-        "INSERT INTO runs (id, project_id, created_at, pipeline_version, theme, bpm, swing, quantize_strength, b_emphasis, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO runs (id, project_id, created_at, pipeline_version, theme, bpm, swing, quantize_strength, b_emphasis, phase_offset_ms, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             run.id.to_string(),
             run.project_id.to_string(),
@@ -160,6 +162,7 @@ pub fn create_run(
             run.swing,
             run.quantize_strength,
             run.b_emphasis,
+            run.phase_offset_ms,
             run.status.to_string(),
         ],
     )?;
@@ -171,7 +174,7 @@ pub fn create_run(
 pub fn get_run(db: &DbConnection, id: &Uuid) -> DbResult<Option<Run>> {
     let conn = db.lock();
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, created_at, pipeline_version, theme, bpm, swing, quantize_strength, b_emphasis, status
+        "SELECT id, project_id, created_at, pipeline_version, theme, bpm, swing, quantize_strength, b_emphasis, phase_offset_ms, status
          FROM runs WHERE id = ?1",
     )?;
 
@@ -186,7 +189,8 @@ pub fn get_run(db: &DbConnection, id: &Uuid) -> DbResult<Option<Run>> {
             swing: row.get(6)?,
             quantize_strength: row.get(7)?,
             b_emphasis: row.get(8)?,
-            status: RunStatus::from_string(&row.get::<_, String>(9)?),
+            phase_offset_ms: row.get(9)?,
+            status: RunStatus::from_string(&row.get::<_, String>(10)?),
         })
     });
 
@@ -201,7 +205,7 @@ pub fn get_run(db: &DbConnection, id: &Uuid) -> DbResult<Option<Run>> {
 pub fn list_runs_for_project(db: &DbConnection, project_id: &Uuid) -> DbResult<Vec<Run>> {
     let conn = db.lock();
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, created_at, pipeline_version, theme, bpm, swing, quantize_strength, b_emphasis, status
+        "SELECT id, project_id, created_at, pipeline_version, theme, bpm, swing, quantize_strength, b_emphasis, phase_offset_ms, status
          FROM runs WHERE project_id = ?1
          ORDER BY created_at DESC",
     )?;
@@ -218,7 +222,8 @@ pub fn list_runs_for_project(db: &DbConnection, project_id: &Uuid) -> DbResult<V
                 swing: row.get(6)?,
                 quantize_strength: row.get(7)?,
                 b_emphasis: row.get(8)?,
-                status: RunStatus::from_string(&row.get::<_, String>(9)?),
+                phase_offset_ms: row.get(9)?,
+                status: RunStatus::from_string(&row.get::<_, String>(10)?),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -448,6 +453,62 @@ mod tests {
         let id = Uuid::new_v4();
         let p = create_project(&db, id, "n".into(), "/p".into(), "sha".into(), 1000).unwrap();
         assert_eq!(p.id, id);
+    }
+
+    #[test]
+    fn create_run_round_trips_phase_offset() {
+        let db = test_db();
+        let project_id = Uuid::new_v4();
+        create_project(&db, project_id, "n".into(), "/p".into(), "sha".into(), 1000).unwrap();
+
+        let run = create_run(
+            &db,
+            project_id,
+            "0.1.0".into(),
+            "theme".into(),
+            120.0,
+            0.0,
+            0.8,
+            0.6,
+            123.4,
+        )
+        .unwrap();
+        assert_eq!(run.phase_offset_ms, 123.4);
+
+        let fetched = get_run(&db, &run.id).unwrap().unwrap();
+        assert_eq!(fetched.phase_offset_ms, 123.4);
+    }
+
+    #[test]
+    fn legacy_run_rows_default_phase_offset_to_zero() {
+        // Simulate a pre-v2 row that was inserted before the phase_offset_ms
+        // column existed. The ALTER TABLE default must backfill it to 0.
+        let db = test_db();
+        let project_id = Uuid::new_v4();
+        create_project(&db, project_id, "n".into(), "/p".into(), "sha".into(), 1000).unwrap();
+
+        let run_id = Uuid::new_v4();
+        db.lock()
+            .execute(
+                "INSERT INTO runs (id, project_id, created_at, pipeline_version, theme, bpm, swing, quantize_strength, b_emphasis, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    run_id.to_string(),
+                    project_id.to_string(),
+                    Utc::now().to_rfc3339(),
+                    "0.1.0",
+                    "theme",
+                    120.0,
+                    0.0,
+                    0.8,
+                    0.6,
+                    "complete",
+                ],
+            )
+            .unwrap();
+
+        let fetched = get_run(&db, &run_id).unwrap().unwrap();
+        assert_eq!(fetched.phase_offset_ms, 0.0);
     }
 
     #[test]

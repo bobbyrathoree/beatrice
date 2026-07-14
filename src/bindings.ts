@@ -420,7 +420,12 @@ export type CommandError = { message: string }
 export type CreateArtifactInput = { run_id: string; kind: string; filename: string; data: number[] }
 export type CreateCalibrationProfileInput = { name: string; profile_data: number[]; notes: string | null }
 export type CreateProjectInput = { name: string; input_data: number[] }
-export type CreateRunInput = { project_id: string; pipeline_version: string; theme: string; bpm: number; swing: number; quantize_strength: number; b_emphasis: number }
+export type CreateRunInput = { project_id: string; pipeline_version: string; theme: string; bpm: number; swing: number; quantize_strength: number; b_emphasis: number; 
+/**
+ * Tempo phase offset (ms). Optional for backward compatibility; defaults
+ * to 0 so callers that predate phase persistence keep working.
+ */
+phase_offset_ms?: number | null }
 export type DetectEventsInput = { file_path: string; run_id: string | null; use_calibration: boolean; calibration_profile_id: string | null }
 export type DetectOnsetsInput = { audio_data: number[]; window_size: number | null; hop_size: number | null; threshold_factor: number | null }
 /**
@@ -616,7 +621,12 @@ snap_delta_ms: number;
  * Position on the musical grid
  */
 grid_position: GridPosition }
-export type Run = { id: string; project_id: string; created_at: string; pipeline_version: string; theme: string; bpm: number; swing: number; quantize_strength: number; b_emphasis: number; status: RunStatus }
+export type Run = { id: string; project_id: string; created_at: string; pipeline_version: string; theme: string; bpm: number; swing: number; quantize_strength: number; b_emphasis: number; 
+/**
+ * Tempo phase offset (ms) captured at creation so replaying this run
+ * anchors quantization/chords exactly as the user first heard it.
+ */
+phase_offset_ms: number; status: RunStatus }
 export type RunStatus = "pending" | "processing" | "complete" | "failed"
 export type RunWithArtifacts = { run: Run; artifacts: Artifact[] }
 export type SaveEventDecisionsInput = { run_id: string; events: EventData[]; quantized_events: QuantizedEvent[] | null; arrangement: Arrangement | null }

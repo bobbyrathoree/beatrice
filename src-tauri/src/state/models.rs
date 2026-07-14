@@ -25,6 +25,9 @@ pub struct Run {
     pub swing: f64,
     pub quantize_strength: f64,
     pub b_emphasis: f64,
+    /// Tempo phase offset (ms) captured at creation so replaying this run
+    /// anchors quantization/chords exactly as the user first heard it.
+    pub phase_offset_ms: f64,
     pub status: RunStatus,
 }
 
