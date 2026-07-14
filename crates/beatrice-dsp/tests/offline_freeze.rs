@@ -30,8 +30,19 @@ const FIXTURES: [&str; 7] = [
     "test-8bar-progression",
 ];
 
-/// Absolute float tolerance for the freeze comparison.
-const EPS: f64 = 1e-6;
+/// Float tolerance for the freeze comparison: `|a-b| <= EPS_ABS + EPS_REL*|b|`.
+///
+/// The golden JSON was frozen on one architecture (aarch64); CI runs on another
+/// (x86_64). f32 fused-multiply-add and libm rounding differ by up to ~1 ULP per
+/// arch, so a large-magnitude feature like `spectral_centroid` (in Hz, ~11295)
+/// legitimately lands one f32 ULP apart cross-arch — ~1e-3 absolute, which a pure
+/// 1e-6 absolute bound wrongly rejects. A relative component makes the freeze
+/// architecture-portable while still catching *real* drift: an actual pipeline
+/// change moves values by fractions of a percent or flips a class/count, orders
+/// of magnitude above these tolerances. One ULP at 11295 is ~9e-8 relative — the
+/// 1e-4 relative bound has a ~1000x margin over arch noise.
+const EPS_ABS: f64 = 1e-6;
+const EPS_REL: f64 = 1e-4;
 
 #[derive(Deserialize)]
 struct GoldenScore {
@@ -136,9 +147,10 @@ fn assert_events_match_golden(events: &[Event], name: &str) {
 
     for (i, (ev, g)) in events.iter().zip(golden.iter()).enumerate() {
         let close = |a: f64, b: f64, field: &str| {
+            let tol = EPS_ABS + EPS_REL * b.abs();
             assert!(
-                (a - b).abs() <= EPS,
-                "[{name}][{i}] {field} drifted: got {a}, golden {b}"
+                (a - b).abs() <= tol,
+                "[{name}][{i}] {field} drifted: got {a}, golden {b} (tol {tol})"
             );
         };
         close(ev.timestamp_ms, g.timestamp_ms, "timestamp_ms");
