@@ -35,6 +35,8 @@ pub fn stranger_things_theme() -> Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Imported for the theme comparison test below.
+    use super::super::blade_runner::blade_runner_theme;
 
     #[test]
     fn test_stranger_things_theme() {
@@ -50,7 +52,7 @@ mod tests {
         assert_eq!(theme.drum_palette, DrumPalette::SynthwaveDrums);
         assert_eq!(theme.fx_profile, FxProfile::DarkDelay);
         assert_eq!(theme.synth_stab_velocity, 90);
-        assert_eq!(theme.pad_sustain, false);
+        assert!(!theme.pad_sustain);
 
         // Check chord progression
         assert_eq!(theme.chord_progression.chords.len(), 4);
@@ -134,6 +136,3 @@ mod tests {
         assert_ne!(st.pad_sustain, br.pad_sustain);
     }
 }
-
-// Import blade_runner for the comparison test
-use super::blade_runner::blade_runner_theme;

@@ -4,10 +4,10 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::events::{Event, EventClass};
+use crate::events::EventClass;
 use crate::groove::quantize::QuantizedEvent;
 use crate::groove::grid::{Grid, GridPosition};
-use super::templates::{ArrangementTemplate, TemplateRules, HihatDensity};
+use super::templates::{ArrangementTemplate, HihatDensity};
 
 /// General Music MIDI note numbers for drums
 pub const MIDI_KICK: u8 = 36;       // C1
@@ -504,7 +504,7 @@ fn should_place_hihat(position: &GridPosition, density: &HihatDensity) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{EventFeatures, EventClass};
+    use crate::events::{Event, EventFeatures, EventClass};
     use crate::groove::grid::{Grid, TimeSignature, GridDivision};
 
     fn create_test_event(timestamp_ms: f64, class: EventClass) -> Event {
@@ -646,7 +646,7 @@ mod tests {
         // High b_emphasis should trigger bass
         let arrangement_high = arrange_events(&events, &template, &grid, &theme, 0.8);
         assert!(arrangement_high.bass_lane.is_some());
-        assert!(arrangement_high.bass_lane.as_ref().unwrap().events.len() > 0);
+        assert!(!arrangement_high.bass_lane.as_ref().unwrap().events.is_empty());
 
         // Low b_emphasis should not trigger bass
         let arrangement_low = arrange_events(&events, &template, &grid, &theme, 0.2);

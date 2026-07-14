@@ -141,7 +141,7 @@ impl HeuristicClassifier {
             + self.config.energy_weight
             + self.config.zcr_weight;
 
-        let mut final_score = (score / total_weight).min(1.0).max(0.0);
+        let mut final_score = (score / total_weight).clamp(0.0, 1.0);
 
         // Crest factor: plosives are transient (high crest factor > 3.0)
         // Penalize if the signal is sustained (low crest factor < 2.5)
@@ -151,7 +151,7 @@ impl HeuristicClassifier {
             final_score *= 1.1; // Boost for clearly transient signals
         }
 
-        final_score.min(1.0).max(0.0)
+        final_score.clamp(0.0, 1.0)
     }
 
     /// Score for HihatNoise (S/SH/TS sounds → hi-hats)
@@ -202,7 +202,7 @@ impl HeuristicClassifier {
             + self.config.energy_weight
             + self.config.zcr_weight;
 
-        (score / total_weight).min(1.0).max(0.0)
+        (score / total_weight).clamp(0.0, 1.0)
     }
 
     /// Score for Click (T/K sounds → snares/claps)
@@ -251,7 +251,7 @@ impl HeuristicClassifier {
             + self.config.energy_weight
             + self.config.zcr_weight;
 
-        (score / total_weight).min(1.0).max(0.0)
+        (score / total_weight).clamp(0.0, 1.0)
     }
 
     /// Score for HumVoiced (vowels/tones → pads/bass)
@@ -301,7 +301,7 @@ impl HeuristicClassifier {
             + self.config.energy_weight
             + self.config.zcr_weight;
 
-        let mut final_score = (score / total_weight).min(1.0).max(0.0);
+        let mut final_score = (score / total_weight).clamp(0.0, 1.0);
 
         // Crest factor is the KEY discriminator vs BilabialPlosive.
         // Hums are sustained (low crest factor < 2.5), plosives are transient (> 3.5).
@@ -311,7 +311,7 @@ impl HeuristicClassifier {
             final_score *= 0.35; // Heavy penalty for transient signals
         }
 
-        final_score.min(1.0).max(0.0)
+        final_score.clamp(0.0, 1.0)
     }
 }
 

@@ -13,8 +13,6 @@ pub enum DbError {
     Io(#[from] std::io::Error),
     #[error("Storage error: {0}")]
     Storage(#[from] StorageError),
-    #[error("Database initialization failed: {0}")]
-    InitFailed(String),
 }
 
 pub type DbResult<T> = Result<T, DbError>;

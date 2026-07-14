@@ -1,6 +1,7 @@
 // Data models for Beatrice state management
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -36,16 +37,19 @@ pub enum RunStatus {
     Failed,
 }
 
-impl RunStatus {
-    pub fn to_string(&self) -> String {
-        match self {
-            RunStatus::Pending => "pending".to_string(),
-            RunStatus::Processing => "processing".to_string(),
-            RunStatus::Complete => "complete".to_string(),
-            RunStatus::Failed => "failed".to_string(),
-        }
+impl fmt::Display for RunStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            RunStatus::Pending => "pending",
+            RunStatus::Processing => "processing",
+            RunStatus::Complete => "complete",
+            RunStatus::Failed => "failed",
+        };
+        write!(f, "{}", s)
     }
+}
 
+impl RunStatus {
     pub fn from_string(s: &str) -> Self {
         match s {
             "pending" => RunStatus::Pending,
@@ -76,16 +80,19 @@ pub enum ArtifactKind {
     Metadata,
 }
 
-impl ArtifactKind {
-    pub fn to_string(&self) -> String {
-        match self {
-            ArtifactKind::Midi => "midi".to_string(),
-            ArtifactKind::Audio => "audio".to_string(),
-            ArtifactKind::Visualization => "visualization".to_string(),
-            ArtifactKind::Metadata => "metadata".to_string(),
-        }
+impl fmt::Display for ArtifactKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ArtifactKind::Midi => "midi",
+            ArtifactKind::Audio => "audio",
+            ArtifactKind::Visualization => "visualization",
+            ArtifactKind::Metadata => "metadata",
+        };
+        write!(f, "{}", s)
     }
+}
 
+impl ArtifactKind {
     pub fn from_string(s: &str) -> Self {
         match s {
             "midi" => ArtifactKind::Midi,

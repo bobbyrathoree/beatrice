@@ -122,6 +122,7 @@ pub fn list_projects(db: &DbConnection) -> DbResult<Vec<ProjectSummary>> {
 // ==================== RUN QUERIES ====================
 
 /// Create a new run
+#[allow(clippy::too_many_arguments)] // run parameters are flat by design; a params struct is a Phase 2 concern
 pub fn create_run(
     db: &DbConnection,
     project_id: Uuid,

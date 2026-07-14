@@ -33,7 +33,6 @@ src-tauri/WixTools/
 src-tauri/target/
 
 # Playwright
-playwright.config.ts
 /tests/
 test-results/
 playwright-report/

@@ -117,11 +117,6 @@ pub fn store_calibration_profile(
     Ok((file_path, hash))
 }
 
-/// Read a file from disk
-pub fn read_file(path: &str) -> StorageResult<Vec<u8>> {
-    Ok(fs::read(path)?)
-}
-
 /// Calculate SHA256 hash of data
 pub fn calculate_sha256(data: &[u8]) -> String {
     let mut hasher = Sha256::new();

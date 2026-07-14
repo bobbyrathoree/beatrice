@@ -245,7 +245,7 @@ pub fn humanize_timing(
 mod tests {
     use super::*;
     use crate::events::{EventClass, EventFeatures};
-    use crate::groove::grid::{TimeSignature, GridDivision, GrooveFeel};
+    use crate::groove::grid::{TimeSignature, GridDivision};
 
     fn create_test_event(timestamp_ms: f64) -> Event {
         Event::new(

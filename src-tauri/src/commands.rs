@@ -4,7 +4,7 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::arranger::{self, ArrangementTemplate, Arrangement, MidiExportOptions};
-use crate::audio::{self, AudioData, OnsetConfig};
+use crate::audio::{self, OnsetConfig};
 use crate::events::{self, Event, EventClass, EventDecision, EventFeatures};
 use crate::groove::{self, TempoEstimate, Grid, GridDivision, GrooveFeel, TimeSignature, QuantizeSettings, QuantizedEvent};
 use crate::pipeline::{TraceBuilder, TraceWriter};
@@ -61,7 +61,7 @@ pub async fn create_project(
     let project_id = Uuid::new_v4();
     let (input_path, _) =
         state::storage::store_file(&project_id, None, "input.wav", &input.input_data)
-            .map_err(|e| CommandError::from(e))?;
+            .map_err(CommandError::from)?;
 
     // Use audio metadata for duration
     let duration_ms = audio_data.duration_ms;
@@ -82,7 +82,7 @@ pub async fn create_project(
         input_sha256,
         duration_ms,
     )
-    .map_err(|e| CommandError::from(e))?;
+    .map_err(CommandError::from)?;
 
     Ok(project)
 }
@@ -90,14 +90,14 @@ pub async fn create_project(
 #[tauri::command]
 #[specta::specta]
 pub fn get_project(db: State<'_, DbConnection>, id: String) -> CommandResult<Option<Project>> {
-    let uuid = Uuid::parse_str(&id).map_err(|e| CommandError::from(e))?;
-    state::get_project(&db, &uuid).map_err(|e| CommandError::from(e))
+    let uuid = Uuid::parse_str(&id).map_err(CommandError::from)?;
+    state::get_project(&db, &uuid).map_err(CommandError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn list_projects(db: State<'_, DbConnection>) -> CommandResult<Vec<ProjectSummary>> {
-    state::list_projects(&db).map_err(|e| CommandError::from(e))
+    state::list_projects(&db).map_err(CommandError::from)
 }
 
 // ==================== RUN COMMANDS ====================
@@ -116,7 +116,7 @@ pub struct CreateRunInput {
 #[tauri::command]
 #[specta::specta]
 pub fn create_run(db: State<'_, DbConnection>, input: CreateRunInput) -> CommandResult<Run> {
-    let project_id = Uuid::parse_str(&input.project_id).map_err(|e| CommandError::from(e))?;
+    let project_id = Uuid::parse_str(&input.project_id).map_err(CommandError::from)?;
 
     let run = state::create_run(
         &db,
@@ -128,7 +128,7 @@ pub fn create_run(db: State<'_, DbConnection>, input: CreateRunInput) -> Command
         input.quantize_strength,
         input.b_emphasis,
     )
-    .map_err(|e| CommandError::from(e))?;
+    .map_err(CommandError::from)?;
 
     Ok(run)
 }
@@ -136,8 +136,8 @@ pub fn create_run(db: State<'_, DbConnection>, input: CreateRunInput) -> Command
 #[tauri::command]
 #[specta::specta]
 pub fn get_run(db: State<'_, DbConnection>, id: String) -> CommandResult<Option<Run>> {
-    let uuid = Uuid::parse_str(&id).map_err(|e| CommandError::from(e))?;
-    state::get_run(&db, &uuid).map_err(|e| CommandError::from(e))
+    let uuid = Uuid::parse_str(&id).map_err(CommandError::from)?;
+    state::get_run(&db, &uuid).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -146,8 +146,8 @@ pub fn list_runs_for_project(
     db: State<'_, DbConnection>,
     project_id: String,
 ) -> CommandResult<Vec<Run>> {
-    let uuid = Uuid::parse_str(&project_id).map_err(|e| CommandError::from(e))?;
-    state::list_runs_for_project(&db, &uuid).map_err(|e| CommandError::from(e))
+    let uuid = Uuid::parse_str(&project_id).map_err(CommandError::from)?;
+    state::list_runs_for_project(&db, &uuid).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -156,8 +156,8 @@ pub fn get_run_with_artifacts(
     db: State<'_, DbConnection>,
     run_id: String,
 ) -> CommandResult<Option<RunWithArtifacts>> {
-    let uuid = Uuid::parse_str(&run_id).map_err(|e| CommandError::from(e))?;
-    state::queries::get_run_with_artifacts(&db, &uuid).map_err(|e| CommandError::from(e))
+    let uuid = Uuid::parse_str(&run_id).map_err(CommandError::from)?;
+    state::queries::get_run_with_artifacts(&db, &uuid).map_err(CommandError::from)
 }
 
 #[derive(Debug, Deserialize, specta::Type)]
@@ -172,9 +172,9 @@ pub fn update_run_status(
     db: State<'_, DbConnection>,
     input: UpdateRunStatusInput,
 ) -> CommandResult<()> {
-    let uuid = Uuid::parse_str(&input.run_id).map_err(|e| CommandError::from(e))?;
+    let uuid = Uuid::parse_str(&input.run_id).map_err(CommandError::from)?;
     let status = RunStatus::from_string(&input.status);
-    state::update_run_status(&db, &uuid, status).map_err(|e| CommandError::from(e))
+    state::update_run_status(&db, &uuid, status).map_err(CommandError::from)
 }
 
 // ==================== ARTIFACT COMMANDS ====================
@@ -193,11 +193,11 @@ pub async fn create_artifact(
     db: State<'_, DbConnection>,
     input: CreateArtifactInput,
 ) -> CommandResult<crate::state::Artifact> {
-    let run_id = Uuid::parse_str(&input.run_id).map_err(|e| CommandError::from(e))?;
+    let run_id = Uuid::parse_str(&input.run_id).map_err(CommandError::from)?;
 
     // Get the run to find project_id
     let run = state::get_run(&db, &run_id)
-        .map_err(|e| CommandError::from(e))?
+        .map_err(CommandError::from)?
         .ok_or_else(|| CommandError {
             message: "Run not found".to_string(),
         })?;
@@ -209,7 +209,7 @@ pub async fn create_artifact(
         &input.filename,
         &input.data,
     )
-    .map_err(|e| CommandError::from(e))?;
+    .map_err(CommandError::from)?;
 
     let artifact = state::create_artifact(
         &db,
@@ -219,7 +219,7 @@ pub async fn create_artifact(
         sha256,
         input.data.len() as i64,
     )
-    .map_err(|e| CommandError::from(e))?;
+    .map_err(CommandError::from)?;
 
     Ok(artifact)
 }
@@ -247,7 +247,7 @@ pub async fn create_calibration_profile(
         "profile.json",
         &input.profile_data,
     )
-    .map_err(|e| CommandError::from(e))?;
+    .map_err(CommandError::from)?;
 
     let profile = state::create_calibration_profile(
         &db,
@@ -255,7 +255,7 @@ pub async fn create_calibration_profile(
         path.to_string_lossy().to_string(),
         input.notes,
     )
-    .map_err(|e| CommandError::from(e))?;
+    .map_err(CommandError::from)?;
 
     Ok(profile)
 }
@@ -266,8 +266,8 @@ pub fn get_calibration_profile(
     db: State<'_, DbConnection>,
     id: String,
 ) -> CommandResult<Option<CalibrationProfile>> {
-    let uuid = Uuid::parse_str(&id).map_err(|e| CommandError::from(e))?;
-    state::get_calibration_profile(&db, &uuid).map_err(|e| CommandError::from(e))
+    let uuid = Uuid::parse_str(&id).map_err(CommandError::from)?;
+    state::get_calibration_profile(&db, &uuid).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -275,7 +275,7 @@ pub fn get_calibration_profile(
 pub fn list_calibration_profiles(
     db: State<'_, DbConnection>,
 ) -> CommandResult<Vec<CalibrationProfile>> {
-    state::list_calibration_profiles(&db).map_err(|e| CommandError::from(e))
+    state::list_calibration_profiles(&db).map_err(CommandError::from)
 }
 
 #[derive(Debug, Deserialize, specta::Type)]
@@ -291,9 +291,9 @@ pub fn update_calibration_profile(
     db: State<'_, DbConnection>,
     input: UpdateCalibrationProfileInput,
 ) -> CommandResult<()> {
-    let uuid = Uuid::parse_str(&input.id).map_err(|e| CommandError::from(e))?;
+    let uuid = Uuid::parse_str(&input.id).map_err(CommandError::from)?;
     state::update_calibration_profile(&db, &uuid, input.name, input.notes)
-        .map_err(|e| CommandError::from(e))
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -302,8 +302,8 @@ pub fn delete_calibration_profile(
     db: State<'_, DbConnection>,
     id: String,
 ) -> CommandResult<()> {
-    let uuid = Uuid::parse_str(&id).map_err(|e| CommandError::from(e))?;
-    state::delete_calibration_profile(&db, &uuid).map_err(|e| CommandError::from(e))
+    let uuid = Uuid::parse_str(&id).map_err(CommandError::from)?;
+    state::delete_calibration_profile(&db, &uuid).map_err(CommandError::from)
 }
 
 // ==================== EVENT DETECTION COMMANDS ====================
@@ -420,16 +420,16 @@ pub async fn detect_events(
 
     // Initialize trace writer if run_id is provided
     let trace_writer = if let Some(ref run_id_str) = input.run_id {
-        let run_id = Uuid::parse_str(run_id_str).map_err(|e| CommandError::from(e))?;
+        let run_id = Uuid::parse_str(run_id_str).map_err(CommandError::from)?;
         let run = state::get_run(&db, &run_id)
-            .map_err(|e| CommandError::from(e))?
+            .map_err(CommandError::from)?
             .ok_or_else(|| CommandError {
                 message: "Run not found".to_string(),
             })?;
 
         // Create trace file path
         let trace_path = state::storage::get_run_dir(&run.project_id, &run_id)
-            .map_err(|e| CommandError::from(e))?
+            .map_err(CommandError::from)?
             .join("trace.jsonl");
 
         Some(TraceWriter::new(trace_path))
@@ -460,11 +460,11 @@ pub async fn detect_events(
     let classifier = if input.use_calibration {
         if let Some(ref profile_id_str) = input.calibration_profile_id {
             let profile_id =
-                Uuid::parse_str(profile_id_str).map_err(|e| CommandError::from(e))?;
+                Uuid::parse_str(profile_id_str).map_err(CommandError::from)?;
 
             // Load calibration profile
             let db_profile = state::get_calibration_profile(&db, &profile_id)
-                .map_err(|e| CommandError::from(e))?
+                .map_err(CommandError::from)?
                 .ok_or_else(|| CommandError {
                     message: "Calibration profile not found".to_string(),
                 })?;
@@ -878,11 +878,11 @@ pub fn save_event_decisions(
     db: State<'_, DbConnection>,
     input: SaveEventDecisionsInput,
 ) -> CommandResult<()> {
-    let run_id = Uuid::parse_str(&input.run_id).map_err(|e| CommandError::from(e))?;
+    let run_id = Uuid::parse_str(&input.run_id).map_err(CommandError::from)?;
 
     // Get project ID from run
     let run = state::get_run(&db, &run_id)
-        .map_err(|e| CommandError::from(e))?
+        .map_err(CommandError::from)?
         .ok_or_else(|| CommandError {
             message: "Run not found".to_string(),
         })?;
@@ -922,7 +922,7 @@ pub fn save_event_decisions(
 
     // Store analysis
     state::storage::store_analysis(&run.project_id, &run_id, &decisions)
-        .map_err(|e| CommandError::from(e))?;
+        .map_err(CommandError::from)?;
 
     Ok(())
 }
@@ -933,16 +933,16 @@ pub fn get_event_decisions(
     db: State<'_, DbConnection>,
     run_id: String,
 ) -> CommandResult<Vec<EventDecision>> {
-    let run_id = Uuid::parse_str(&run_id).map_err(|e| CommandError::from(e))?;
+    let run_id = Uuid::parse_str(&run_id).map_err(CommandError::from)?;
 
     let run = state::get_run(&db, &run_id)
-        .map_err(|e| CommandError::from(e))?
+        .map_err(CommandError::from)?
         .ok_or_else(|| CommandError {
             message: "Run not found".to_string(),
         })?;
 
     let decisions = state::storage::read_analysis(&run.project_id, &run_id)
-        .map_err(|e| CommandError::from(e))?
+        .map_err(CommandError::from)?
         .unwrap_or_else(Vec::new);
 
     Ok(decisions)
@@ -976,13 +976,8 @@ pub fn list_theme_names() -> CommandResult<Vec<String>> {
 use crate::audio::AudioRecorder;
 
 /// Global recorder state managed by Tauri
+#[derive(Default)]
 pub struct RecorderState(pub AudioRecorder);
-
-impl Default for RecorderState {
-    fn default() -> Self {
-        Self(AudioRecorder::new())
-    }
-}
 
 /// Start audio recording from the default input device
 #[tauri::command]

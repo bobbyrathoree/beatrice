@@ -3,4 +3,4 @@
 
 pub mod trace;
 
-pub use trace::{TraceBuilder, TraceEntry, TraceError, TraceWriter, read_trace_file};
+pub use trace::{TraceBuilder, TraceWriter};

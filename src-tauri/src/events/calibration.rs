@@ -102,7 +102,7 @@ impl CalibrationProfile {
     pub fn add_sample(&mut self, sample: CalibrationSample) {
         self.samples
             .entry(sample.class)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(sample);
     }
 
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn test_calibration_profile_creation() {
-        let mut profile = CalibrationProfile::new("Test Profile".to_string());
+        let profile = CalibrationProfile::new("Test Profile".to_string());
 
         assert_eq!(profile.name, "Test Profile");
         assert_eq!(profile.total_samples(), 0);

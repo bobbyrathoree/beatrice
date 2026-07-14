@@ -2,8 +2,7 @@
 // Implements Spectral Flux (Superflux algorithm) for onset detection
 // and extracts features for event classification
 
-use realfft::{RealFftPlanner, RealToComplex};
-use std::sync::Arc;
+use realfft::RealFftPlanner;
 
 use crate::audio::AudioData;
 use crate::events::types::EventFeatures;
@@ -153,9 +152,9 @@ fn apply_hann_window(samples: &mut [f32]) {
         return;
     }
 
-    for i in 0..n {
+    for (i, sample) in samples.iter_mut().enumerate() {
         let window_val = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / n as f32).cos());
-        samples[i] *= window_val;
+        *sample *= window_val;
     }
 }
 
@@ -297,7 +296,7 @@ pub fn detect_onsets(audio: &AudioData, config: &OnsetConfig) -> Vec<Onset> {
 
     // Prepend the leading onset if it doesn't overlap with the first detected onset
     if let Some(leading) = leading_onset {
-        let too_close = onsets.first().map_or(false, |first| first.timestamp_ms < config.min_onset_gap_ms);
+        let too_close = onsets.first().is_some_and(|first| first.timestamp_ms < config.min_onset_gap_ms);
         if !too_close {
             onsets.insert(0, leading);
         }
@@ -391,7 +390,7 @@ fn detect_energy_onsets(samples: &[f32], sample_rate: u32, config: &OnsetConfig)
 /// Spectral flux = sum of positive differences between consecutive magnitude spectra
 fn compute_spectral_flux(
     samples: &[f32],
-    sample_rate: u32,
+    _sample_rate: u32,
     config: &OnsetConfig,
 ) -> Vec<f32> {
     let window_size = config.window_size;
@@ -520,7 +519,7 @@ fn pick_onset_peaks(
 
             onsets.push(Onset {
                 timestamp_ms,
-                strength: strength.min(1.0).max(0.0),
+                strength: strength.clamp(0.0, 1.0),
             });
 
             last_onset_frame = i;

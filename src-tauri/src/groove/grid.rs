@@ -195,7 +195,7 @@ impl Grid {
 
     /// Update BPM and recalculate positions
     pub fn set_bpm(&mut self, bpm: f64) {
-        self.bpm = bpm.max(20.0).min(300.0);
+        self.bpm = bpm.clamp(20.0, 300.0);
         self.calculate_beat_positions();
     }
 

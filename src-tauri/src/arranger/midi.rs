@@ -78,7 +78,7 @@ pub fn export_midi(
 
     // Add time signature
     if options.include_time_signature {
-        add_time_signature(&mut meta_track, 0, &grid);
+        add_time_signature(&mut meta_track, 0, grid);
     }
 
     // End of track
@@ -342,7 +342,7 @@ mod tests {
 
         assert!(result.is_ok());
         let bytes = result.unwrap();
-        assert!(bytes.len() > 0);
+        assert!(!bytes.is_empty());
     }
 
     #[test]
@@ -369,7 +369,7 @@ mod tests {
 
         assert!(result.is_ok());
         let bytes = result.unwrap();
-        assert!(bytes.len() > 0);
+        assert!(!bytes.is_empty());
 
         // Verify it's a valid MIDI file by parsing it back
         let parsed = Smf::parse(&bytes);

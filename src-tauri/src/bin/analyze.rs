@@ -1,5 +1,5 @@
-/// CLI tool to analyze a WAV file through the Beatrice pipeline.
-/// Usage: cargo run --bin analyze -- <path-to-wav>
+//! CLI tool to analyze a WAV file through the Beatrice pipeline.
+//! Usage: cargo run --bin analyze -- <path-to-wav>
 
 use std::env;
 use std::fs;

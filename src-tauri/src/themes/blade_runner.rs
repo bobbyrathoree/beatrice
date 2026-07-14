@@ -50,7 +50,7 @@ mod tests {
         assert_eq!(theme.drum_palette, DrumPalette::SynthwaveDrums);
         assert_eq!(theme.fx_profile, FxProfile::GatedReverb);
         assert_eq!(theme.synth_stab_velocity, 100);
-        assert_eq!(theme.pad_sustain, true);
+        assert!(theme.pad_sustain);
 
         // Check chord progression
         assert_eq!(theme.chord_progression.chords.len(), 4);

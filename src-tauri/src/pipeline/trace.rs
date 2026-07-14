@@ -1,7 +1,7 @@
 // Pipeline progress tracing
 // Append-only JSONL trace file for monitoring pipeline execution
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -101,6 +101,7 @@ impl TraceWriter {
     }
 
     /// Write multiple entries at once
+    #[allow(dead_code)] // used by Phase 2 tracing
     pub fn write_batch(&self, entries: &[TraceEntry]) -> Result<(), TraceError> {
         let mut file = OpenOptions::new()
             .create(true)
@@ -117,6 +118,7 @@ impl TraceWriter {
     }
 
     /// Get the trace file path
+    #[allow(dead_code)] // used by Phase 2 tracing
     pub fn path(&self) -> &Path {
         &self.file_path
     }
@@ -146,6 +148,7 @@ impl TraceBuilder {
     }
 
     /// Create a complete entry (progress = 1.0)
+    #[allow(dead_code)] // used by Phase 2 tracing
     pub fn complete(self, message: impl Into<String>) -> TraceEntry {
         TraceEntry::new(self.stage, 1.0, message.into())
     }
@@ -162,6 +165,7 @@ impl TraceBuilder {
 }
 
 /// Read trace entries from a JSONL file
+#[allow(dead_code)] // used by Phase 2 tracing
 pub fn read_trace_file(path: &Path) -> Result<Vec<TraceEntry>, TraceError> {
     let contents = std::fs::read_to_string(path)?;
     let mut entries = Vec::new();
@@ -181,7 +185,6 @@ pub fn read_trace_file(path: &Path) -> Result<Vec<TraceEntry>, TraceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     #[test]
