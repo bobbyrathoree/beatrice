@@ -27,7 +27,7 @@ export async function renderArrangementToWav(
 }
 
 /** Encode an AudioBuffer as 16-bit stereo little-endian PCM WAV bytes. */
-function encodeWav16(buf: AudioBuffer): Uint8Array<ArrayBuffer> {
+export function encodeWav16(buf: AudioBuffer): Uint8Array<ArrayBuffer> {
   const ch = [
     buf.getChannelData(0),
     buf.numberOfChannels > 1 ? buf.getChannelData(1) : buf.getChannelData(0),

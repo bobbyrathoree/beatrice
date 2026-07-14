@@ -27,6 +27,7 @@ import { Waveform } from "./components/Waveform";
 import { BeatMarkers } from "./components/BeatMarkers";
 import { PlaybackControls } from "./components/PlaybackControls";
 import { SessionSidebar } from "./components/SessionSidebar";
+import { JamScreen } from "./components/Jam/JamScreen";
 import { useAudioPlayback } from "./hooks/useAudioPlayback";
 import type { Project, Run } from "./store/useStore";
 import type { ProjectSummary } from "./hooks/useProjects";
@@ -34,7 +35,7 @@ import type { EventDecision } from "./types/explainability";
 import { EVENT_CLASS_NAMES } from "./types/explainability";
 import "./styles/brutalist.css";
 
-type AppState = "input" | "recording" | "processing" | "results";
+type AppState = "input" | "recording" | "jam" | "processing" | "results";
 
 // Map a selected theme to an arrangement template name
 function mapThemeToTemplate(theme: Theme | null): string {
@@ -883,6 +884,43 @@ function App() {
                   onError={handleError}
                 />
               </motion.div>
+
+              {/* Jam Mode — visual live jam + capture into the offline pipeline */}
+              <motion.div
+                className="demo-section"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5 }}
+              >
+                <motion.button
+                  className="btn btn-large"
+                  data-testid="jam-mode-button"
+                  onClick={() => setState("jam")}
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                  style={{ width: "100%" }}
+                >
+                  ◉ JAM MODE
+                </motion.button>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {/* JAM STATE — visual live jam + capture (Phase 3 Task 4, [GATE-FAIL]) */}
+          {state === "jam" && (
+            <motion.div
+              key="jam"
+              className="recording-container"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.3 }}
+            >
+              <JamScreen
+                onProjectCreated={handleProjectCreated}
+                onError={handleError}
+                onExit={handleCancelRecording}
+              />
             </motion.div>
           )}
 

@@ -29,4 +29,12 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
   },
+  // The AudioWorklet + WASM handshake only completes in a PRODUCTION build (the
+  // Vite dev server serves the worklet unbundled and never reaches "ready" —
+  // see docs/latency.md). So the jam e2e runs against `vite preview`, which we
+  // pin to the same port/host the smoke tests already use.
+  preview: {
+    port: 1420,
+    strictPort: true,
+  },
 });

@@ -1,59 +1,131 @@
-// useJamSession — Phase 3 SPIKE hook.
+// useJamSession — Phase 3 Task 4, VISUAL JAM ([GATE-FAIL]) form.
 //
-// Wires the live path end-to-end so the latency harness has something real to
-// measure: mic -> AudioWorklet (WASM RMS detector) -> on "hit" schedule a kick.
-// This is deliberately minimal (the productionized session lands in Tasks 4-5).
-// The verified WASM-in-worklet loading sequence lives in ../worklet/loadDetector.
+// The Phase 3 latency spike recorded NO-GO (acoustic P95 ~100ms vs the 60ms
+// budget; docs/latency.md), so live synth triggering is DISABLED. On each
+// worklet event we only:
+//   1. flash it visually (append to `liveEvents`),
+//   2. push it into the rolling JamBuffer (UI/inspection history), and
+//   3. bump `eventCount`.
+// There are NO scheduleKick/Snare/... calls — the user's mouth does not drive
+// real-time synthesis (that path missed the acoustic budget).
+//
+// CAPTURE ARCHITECTURE (Codex-hardened, single source of truth): live events
+// are PREVIEW ONLY and are discarded at capture. `capture()` returns a WAV of
+// the last N seconds of the mic, recorded in PARALLEL on the main thread via
+// MediaRecorder -> decodeAudioData -> encodeWav16 (Phase 1). That WAV enters the
+// app exactly like an upload: the caller feeds it to
+// `commands.createProject(...)` -> the EXISTING offline pipeline. This is fully
+// frontend so it also works in the browser mock demo. We do NOT use the native
+// Rust start_recording/stop_recording path.
 
 import { useCallback, useRef, useState } from "react";
-import {
-  createFxBus,
-  scheduleKick,
-  type FxBus,
-} from "../audio/scheduleArrangement";
 import { loadDetectorNode } from "../worklet/loadDetector";
+import { encodeWav16 } from "../audio/renderWav";
+import { JamBuffer } from "./jamBuffer";
 
-/** EventClass id emitted by the WASM detector (see class_id in lib.rs). */
+/** EventClass id emitted by the WASM detector (0=kick,1=hihat,2=snare/click,3=hum). */
 export type JamClassId = 0 | 1 | 2 | 3;
 
-export interface JamHit {
-  /** worklet `currentTime` (seconds) when the transient was detected */
-  t: number;
-  /** onset's estimated time relative to stream start (ms) */
-  tMs?: number;
-  /** classified EventClass id (0=kick, 1=hihat, 2=snare/click, 3=hum) */
-  classId?: JamClassId;
+/** A live detector event surfaced to the UI for flash tiles. */
+export interface JamLiveEvent {
+  /** monotonically increasing key for React lists */
+  key: number;
+  /** onset time relative to stream start (ms) */
+  tMs: number;
+  /** classified EventClass id */
+  classId: JamClassId;
   /** classification confidence [0,1] */
-  conf?: number;
+  conf: number;
 }
 
 export interface JamSession {
-  status: "idle" | "starting" | "ready" | "error";
+  /** true between a successful start() and stop()/capture() teardown */
+  isRunning: boolean;
+  /** null unless start() failed */
   error: string | null;
-  start: (onHit?: (hit: JamHit) => void) => Promise<void>;
+  /** recent live events (capped tail) for flash tiles */
+  liveEvents: JamLiveEvent[];
+  /** cumulative count of events since start() (never trimmed) */
+  eventCount: number;
+  /** smoothed input RMS level [0,1] for the meter */
+  level: number;
+  /** the live AnalyserNode, for the waveform canvas (null until ready) */
+  analyser: AnalyserNode | null;
+  /** begin a jam session: mic -> worklet (visual) + parallel WAV recording */
+  start: () => Promise<void>;
+  /** stop and discard everything (no WAV) */
   stop: () => Promise<void>;
+  /** stop, return the last-N-seconds mic recording as WAV bytes */
+  capture: () => Promise<Uint8Array>;
 }
 
+/** How many seconds of the rolling mic recording capture() keeps. */
+const CAPTURE_WINDOW_SEC = 12;
+/** JamBuffer window (ms) — matches the capture window for consistent history. */
+const BUFFER_WINDOW_MS = CAPTURE_WINDOW_SEC * 1000;
+/** How many recent events to keep for flash tiles. */
+const LIVE_TAIL = 32;
+
 export function useJamSession(): JamSession {
-  const [status, setStatus] = useState<JamSession["status"]>("idle");
+  const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [liveEvents, setLiveEvents] = useState<JamLiveEvent[]>([]);
+  const [eventCount, setEventCount] = useState(0);
+  const [level, setLevel] = useState(0);
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
   const ctxRef = useRef<AudioContext | null>(null);
-  const busRef = useRef<FxBus | null>(null);
   const nodeRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const levelTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bufferRef = useRef<JamBuffer>(new JamBuffer(BUFFER_WINDOW_MS));
+  const keyRef = useRef(0);
 
-  const start = useCallback(async (onHit?: (hit: JamHit) => void) => {
-    setStatus("starting");
+  const teardown = useCallback(async () => {
+    if (levelTimerRef.current) {
+      clearInterval(levelTimerRef.current);
+      levelTimerRef.current = null;
+    }
+    try {
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        recorderRef.current.stop();
+      }
+    } catch {
+      /* recorder already stopped */
+    }
+    recorderRef.current = null;
+    nodeRef.current?.disconnect();
+    analyserRef.current?.disconnect();
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    try {
+      await ctxRef.current?.close();
+    } catch {
+      /* context already closed */
+    }
+    nodeRef.current = null;
+    analyserRef.current = null;
+    streamRef.current = null;
+    ctxRef.current = null;
+    setAnalyser(null);
+    setLevel(0);
+    setIsRunning(false);
+  }, []);
+
+  const start = useCallback(async () => {
     setError(null);
+    setLiveEvents([]);
+    setEventCount(0);
+    bufferRef.current = new JamBuffer(BUFFER_WINDOW_MS);
+    keyRef.current = 0;
+    chunksRef.current = [];
+
     try {
       const ctx = new AudioContext();
       await ctx.resume();
       ctxRef.current = ctx;
-
-      // Master FX bus -> speakers. Kicks are scheduled onto this bus.
-      const bus = createFxBus(ctx, ctx.destination);
-      busRef.current = bus;
 
       // Transients must NOT be smeared by the browser's voice-processing DSP.
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -68,8 +140,29 @@ export function useJamSession(): JamSession {
       const node = await loadDetectorNode(ctx);
       nodeRef.current = node;
 
-      // Route classified onsets to a kick + optional caller callback. The
-      // StreamingDetector posts { type: "event", t, tMs, classId, conf }.
+      // Rolling mic recording (the CAPTURE source of truth). Runs in parallel
+      // with detection; timeslice so onstop always has flushed chunks.
+      const rec = new MediaRecorder(stream);
+      rec.ondataavailable = (e: BlobEvent) => {
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      rec.start(1000);
+      recorderRef.current = rec;
+
+      // Analyser for the waveform canvas + level meter. Routed through a MUTED
+      // gain to the destination so the node is actually pulled by the graph
+      // without leaking mic audio to the speakers.
+      const an = ctx.createAnalyser();
+      an.fftSize = 1024;
+      const muted = ctx.createGain();
+      muted.gain.value = 0;
+      an.connect(muted);
+      muted.connect(ctx.destination);
+      analyserRef.current = an;
+      setAnalyser(an);
+
+      // [GATE-FAIL] VISUAL JAM: on each detector event, flash + buffer only.
+      // The StreamingDetector posts { type: "event", t, tMs, classId, conf }.
       node.port.onmessage = (e: MessageEvent) => {
         const data = e.data as {
           type: string;
@@ -78,39 +171,97 @@ export function useJamSession(): JamSession {
           classId?: number;
           conf?: number;
         };
-        if (data.type === "event") {
-          scheduleKick(ctx, bus, ctx.currentTime, 120);
-          onHit?.({
-            t: data.t ?? ctx.currentTime,
-            tMs: data.tMs,
-            classId: data.classId as JamClassId | undefined,
-            conf: data.conf,
-          });
-        }
+        if (data.type !== "event") return;
+        const tMs = data.tMs ?? 0;
+        const classId = (data.classId ?? 0) as JamClassId;
+        const conf = data.conf ?? 0;
+
+        bufferRef.current.push({ t_ms: tMs, classId, conf });
+        const key = keyRef.current++;
+        setLiveEvents((prev) => {
+          const next = [...prev, { key, tMs, classId, conf }];
+          return next.length > LIVE_TAIL ? next.slice(-LIVE_TAIL) : next;
+        });
+        setEventCount((c) => c + 1);
       };
 
-      // Mic -> detector. The worklet only reads its input (returns true); it
-      // produces no audio, so we do not connect it to the destination.
+      // Mic -> detector (silent; connected to destination so process() is
+      // pulled) and mic -> analyser. The worklet writes no output, so wiring it
+      // to the destination is acoustically silent.
       const src = ctx.createMediaStreamSource(stream);
       src.connect(node);
+      node.connect(ctx.destination);
+      src.connect(an);
 
-      setStatus("ready");
+      // Level meter: smoothed RMS of the time-domain signal, ~20fps.
+      const timeBuf = new Float32Array(an.fftSize);
+      levelTimerRef.current = setInterval(() => {
+        an.getFloatTimeDomainData(timeBuf);
+        let sum = 0;
+        for (let i = 0; i < timeBuf.length; i++) sum += timeBuf[i] * timeBuf[i];
+        const rms = Math.sqrt(sum / timeBuf.length);
+        setLevel((prev) => prev * 0.6 + Math.min(1, rms * 4) * 0.4);
+      }, 50);
+
+      setIsRunning(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setStatus("error");
+      await teardown();
     }
-  }, []);
+  }, [teardown]);
 
   const stop = useCallback(async () => {
-    nodeRef.current?.disconnect();
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    await ctxRef.current?.close();
-    nodeRef.current = null;
-    streamRef.current = null;
-    busRef.current = null;
-    ctxRef.current = null;
-    setStatus("idle");
-  }, []);
+    await teardown();
+  }, [teardown]);
 
-  return { status, error, start, stop };
+  const capture = useCallback(async (): Promise<Uint8Array> => {
+    const ctx = ctxRef.current;
+    const rec = recorderRef.current;
+    if (!ctx || !rec) {
+      throw new Error("No active jam session to capture");
+    }
+
+    // Flush the recorder and gather all chunks into one blob.
+    const blob = await new Promise<Blob>((resolve) => {
+      if (rec.state === "inactive") {
+        resolve(new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" }));
+        return;
+      }
+      rec.onstop = () => {
+        resolve(new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" }));
+      };
+      rec.stop();
+    });
+
+    // Decode -> slice last N seconds -> re-encode as PCM16 WAV (Phase 1).
+    const arrayBuf = await blob.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
+    const sr = decoded.sampleRate;
+    const wantFrames = Math.min(decoded.length, Math.ceil(CAPTURE_WINDOW_SEC * sr));
+    const startFrame = decoded.length - wantFrames;
+    const sliced = new AudioBuffer({
+      length: wantFrames,
+      numberOfChannels: decoded.numberOfChannels,
+      sampleRate: sr,
+    });
+    for (let c = 0; c < decoded.numberOfChannels; c++) {
+      sliced.copyToChannel(decoded.getChannelData(c).subarray(startFrame), c, 0);
+    }
+    const wav = encodeWav16(sliced);
+
+    await teardown();
+    return wav;
+  }, [teardown]);
+
+  return {
+    isRunning,
+    error,
+    liveEvents,
+    eventCount,
+    level,
+    analyser,
+    start,
+    stop,
+    capture,
+  };
 }
