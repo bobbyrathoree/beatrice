@@ -22,6 +22,7 @@ import { useCallback, useRef, useState } from "react";
 import { loadDetectorNode } from "../worklet/loadDetector";
 import { encodeWav16 } from "../audio/renderWav";
 import { JamBuffer } from "./jamBuffer";
+import { negotiateRecorderMimeType } from "./recorderMime";
 
 /** EventClass id emitted by the WASM detector (0=kick,1=hihat,2=snare/click,3=hum). */
 export type JamClassId = 0 | 1 | 2 | 3;
@@ -79,6 +80,10 @@ export function useJamSession(): JamSession {
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  // The mimeType the recorder is actually producing (engine-negotiated). Used to
+  // label the capture Blob honestly. "" means "browser default" — we then read
+  // the recorder's own `mimeType` at capture instead of asserting a container.
+  const recMimeRef = useRef<string>("");
   const analyserRef = useRef<AnalyserNode | null>(null);
   const levelTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bufferRef = useRef<JamBuffer>(new JamBuffer(BUFFER_WINDOW_MS));
@@ -142,7 +147,26 @@ export function useJamSession(): JamSession {
 
       // Rolling mic recording (the CAPTURE source of truth). Runs in parallel
       // with detection; timeslice so onstop always has flushed chunks.
-      const rec = new MediaRecorder(stream);
+      //
+      // The mimeType MUST be negotiated per engine: WKWebView (the native macOS
+      // app) does not support webm/opus and would throw NotSupportedError or
+      // mislabel an mp4/aac blob as webm if left to the no-arg default. We probe
+      // isTypeSupported, construct with the winner, and — belt and braces —
+      // retry with no options (browser default) if construction still throws.
+      const negotiated = negotiateRecorderMimeType();
+      let rec: MediaRecorder;
+      try {
+        rec = negotiated
+          ? new MediaRecorder(stream, { mimeType: negotiated })
+          : new MediaRecorder(stream);
+      } catch {
+        // Engine rejected the negotiated type (WKWebView can lie about support).
+        // Fall back to the browser default before giving up.
+        rec = new MediaRecorder(stream);
+      }
+      // Record what the recorder is truly producing (may differ from negotiated
+      // when we fell back to the default), for an honest capture Blob type.
+      recMimeRef.current = rec.mimeType || negotiated;
       rec.ondataavailable = (e: BlobEvent) => {
         if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
       };
@@ -221,18 +245,27 @@ export function useJamSession(): JamSession {
       throw new Error("No active jam session to capture");
     }
 
+    // Blob type must match what the recorder actually produced (webm/opus on
+    // Chromium, mp4/aac on WKWebView). Prefer the recorder's live `mimeType`,
+    // fall back to the engine-negotiated type captured at start(). Do NOT hard-
+    // code "audio/webm" — that mislabels WKWebView's mp4 container.
+    const blobType = rec.mimeType || recMimeRef.current;
     // Flush the recorder and gather all chunks into one blob.
     const blob = await new Promise<Blob>((resolve) => {
       if (rec.state === "inactive") {
-        resolve(new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" }));
+        resolve(new Blob(chunksRef.current, blobType ? { type: blobType } : undefined));
         return;
       }
       rec.onstop = () => {
-        resolve(new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" }));
+        resolve(new Blob(chunksRef.current, blobType ? { type: blobType } : undefined));
       };
       rec.stop();
     });
 
+    // IMPORTANT ORDERING: decode BEFORE teardown(). `decodeAudioData` runs on
+    // `ctx`, and teardown() calls `ctx.close()`; decoding after close would
+    // reject. `decodeAudioData` is container-agnostic (it sniffs the bytes), so
+    // it handles both the Chromium webm/opus and WKWebView mp4/aac blobs.
     // Decode -> slice last N seconds -> re-encode as PCM16 WAV (Phase 1).
     const arrayBuf = await blob.arrayBuffer();
     const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));

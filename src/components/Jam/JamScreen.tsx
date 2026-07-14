@@ -11,8 +11,9 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { commands, unwrap } from "../../types/ipc";
 import { EVENT_CLASS_COLORS, EVENT_CLASS_NAMES } from "../../types/explainability";
-import type { EventClass } from "../../types/explainability";
-import { useJamSession, type JamClassId } from "../../hooks/useJamSession";
+import { useJamSession } from "../../hooks/useJamSession";
+// Single source of truth for classId -> EventClass (shared with the JamBuffer).
+import { JAM_CLASS_TO_EVENT_CLASS } from "../../hooks/jamBuffer";
 import type { Project } from "../../store/useStore";
 
 interface JamScreenProps {
@@ -20,13 +21,6 @@ interface JamScreenProps {
   onError: (error: string) => void;
   onExit: () => void;
 }
-
-const CLASS_ID_TO_EVENT_CLASS: Record<JamClassId, EventClass> = {
-  0: "BilabialPlosive",
-  1: "HihatNoise",
-  2: "Click",
-  3: "HumVoiced",
-};
 
 export function JamScreen({ onProjectCreated, onError, onExit }: JamScreenProps) {
   const { isRunning, error, liveEvents, eventCount, level, analyser, start, stop, capture } =
@@ -192,7 +186,7 @@ export function JamScreen({ onProjectCreated, onError, onExit }: JamScreenProps)
       >
         <AnimatePresence initial={false}>
           {liveEvents.map((ev) => {
-            const cls = CLASS_ID_TO_EVENT_CLASS[ev.classId] ?? "BilabialPlosive";
+            const cls = JAM_CLASS_TO_EVENT_CLASS[ev.classId] ?? "BilabialPlosive";
             return (
               <motion.div
                 key={ev.key}
