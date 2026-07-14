@@ -176,6 +176,41 @@ function generatePattern() {
   return samples;
 }
 
+/**
+ * Off-grid twin fixture for the arranger fidelity regression fence
+ * (tests/groove_faithfulness.rs). A kick/snare/hihat pattern at 120 BPM where
+ * EVERY hit is deliberately offset +37ms from its grid slot — so no hit lands on
+ * a template position. This is the CI-enforced guard against the "arranger
+ * discards your performance" bug class: at fidelity 1.0 every detected drum-class
+ * event must still yield a note. 4 bars, mono, 44.1kHz.
+ */
+function generateOffgrid() {
+  const bpm = 120;
+  const beatMs = 60000 / bpm; // 500ms
+  const totalBars = 4;
+  const OFFSET_MS = 37; // deliberate off-grid nudge — off every template position
+  const totalSec = (beatMs * 4 * totalBars + 500) / 1000;
+  const n = Math.floor(SAMPLE_RATE * totalSec);
+  const samples = new Float64Array(n);
+
+  for (let bar = 0; bar < totalBars; bar++) {
+    const barOffset = bar * beatMs * 4 + OFFSET_MS;
+    // Kick on 1, Snare on 2, Kick on 3, Snare on 4 — all shifted off-grid.
+    addHit(samples, barOffset + 0 * beatMs, generateKick, 0.1);
+    addHit(samples, barOffset + 1 * beatMs, generateSnare, 0.1);
+    addHit(samples, barOffset + 2 * beatMs, generateKick, 0.1);
+    addHit(samples, barOffset + 3 * beatMs, generateSnare, 0.1);
+
+    // Hihats on all offbeats (8ths), also off-grid.
+    for (let beat = 0; beat < 4; beat++) {
+      addHit(samples, barOffset + beat * beatMs + beatMs / 2, generateHihat, 0.05);
+    }
+  }
+
+  normalize(samples);
+  return samples;
+}
+
 function addHit(buffer, timeMs, gen, dur) {
   const hitSamples = gen(dur);
   const startIdx = Math.floor(timeMs * SAMPLE_RATE / 1000);
@@ -200,4 +235,5 @@ writeWav('test-snare.wav', generateSnare(0.1));
 writeWav('test-hum.wav', generateHum(1.0));
 writeWav('test-8bar-progression.wav', generate8BarProgression());
 writeWav('test-pattern.wav', generatePattern());
+writeWav('test-offgrid.wav', generateOffgrid());
 console.log('Done.');

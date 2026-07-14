@@ -284,14 +284,32 @@ use crate::themes::{Theme, scale_notes, chord_notes, bass_notes, arp_notes};
 /// - Template rules (which positions get which instruments)
 /// - Theme's harmonic context (Scale, Chord Progression)
 /// - B-emphasis parameter (controls synth note triggering)
+///
+/// # Fidelity (spec §4.3 — deterministic placement, replaces template gating)
+///
+/// `fidelity` in `[0.0, 1.0]` trades performer-faithfulness against template
+/// tidiness. It NEVER deletes a detected event:
+/// - `1.0` ("Follow me"): every event plays at its quantized position; templates
+///   only shape velocity/duration.
+/// - `0.0` ("Produce for me"): off-template hits MOVE to the nearest template
+///   slot (same-slot collisions merge, louder wins) — still never dropped.
+/// - between: position lerps toward the template slot by `(1 - fidelity)`, and
+///   off-template velocity is attenuated proportional to distance.
+///
+/// SINGLE-PLACEMENT RULE: each source event is placed exactly once; every note it
+/// spawns (kick + its bass note, hi-hat + its arp note, …) shares that one placed
+/// time so nothing desyncs. There is no randomness anywhere — output is a pure
+/// function of the inputs.
 pub fn arrange_events(
     events: &[QuantizedEvent],
     template: &ArrangementTemplate,
     grid: &Grid,
     theme: &Theme,
     b_emphasis: f32,
+    fidelity: f32,
 ) -> Arrangement {
     let rules = template.rules();
+    let fidelity = fidelity.clamp(0.0, 1.0);
     let total_duration = grid.total_duration_ms();
 
     let mut arrangement = Arrangement::new(*template, total_duration, grid.bar_count);
@@ -316,11 +334,6 @@ pub fn arrange_events(
     for event in events {
         let timestamp = event.quantized_timestamp_ms;
 
-        // Resolve harmonic context for this specific moment
-        let chord_type = theme.get_chord_at_time(timestamp, grid);
-        let current_chord = chord_notes(theme.root_note, &chord_type, &scale);
-        let chord_root = current_chord[0];
-
         match event.original_event.class {
             EventClass::BilabialPlosive => {
                 // B/P sounds -> Kick + Bass Synth
@@ -329,22 +342,40 @@ pub fn arrange_events(
                     event.original_event.features.peak_amplitude,
                 );
 
-                // Always add to kick lane if it matches template kick positions
-                if should_place_on_beat(&event.grid_position, &rules.kick_positions, grid) {
-                    kick_lane.add_note(ArrangedNote::from_quantized_event(event, velocity));
-                }
+                // SINGLE PLACEMENT: compute once against the kick template, reuse
+                // for both the kick note and the bass note it spawns.
+                let (placed_time, vscale) =
+                    place_event(timestamp, &rules.kick_positions, grid, fidelity);
 
-                // Add bass synth note if b_emphasis is high enough
+                // Kick always survives; the template only shapes its velocity.
+                kick_lane.add_note(ArrangedNote::new(
+                    placed_time,
+                    event.original_event.duration_ms.min(100.0),
+                    (velocity as f32 * vscale) as u8,
+                    None,
+                    Some(event.original_event.id),
+                ));
+
+                // Add bass synth note if b_emphasis is high enough. It schedules at
+                // the SAME placed_time so it can't desync from a moved kick, and its
+                // pattern index derives from the placed position, not the raw one.
                 if b_emphasis > 0.3 {
                     let bass_velocity = (velocity as f32 * b_emphasis) as u8;
 
-                    // Resolve bass note based on theme pattern and beat position
+                    // Harmonic context resolved at the note's actual sounding time.
+                    let chord_type = theme.get_chord_at_time(placed_time, grid);
+                    let current_chord = chord_notes(theme.root_note, &chord_type, &scale);
+                    let chord_root = current_chord[0];
+                    let placed_pos = grid.get_grid_position(placed_time);
+
                     let pattern_notes = bass_notes(chord_root, &theme.bass_pattern);
-                    let note_index = (event.grid_position.beat as usize + event.grid_position.subdivision as usize) % pattern_notes.len();
+                    let note_index = (placed_pos.beat as usize
+                        + placed_pos.subdivision as usize)
+                        % pattern_notes.len();
                     let bass_note = pattern_notes[note_index] - 12; // Shift down an octave for bass
 
                     bass_lane.add_note(ArrangedNote::new(
-                        timestamp,
+                        placed_time,
                         200.0, // Standard bass duration
                         bass_velocity,
                         Some(bass_note),
@@ -360,9 +391,16 @@ pub fn arrange_events(
                     event.original_event.features.peak_amplitude,
                 );
 
-                if should_place_on_beat(&event.grid_position, &rules.snare_positions, grid) {
-                    snare_lane.add_note(ArrangedNote::from_quantized_event(event, velocity));
-                }
+                let (placed_time, vscale) =
+                    place_event(timestamp, &rules.snare_positions, grid, fidelity);
+
+                snare_lane.add_note(ArrangedNote::new(
+                    placed_time,
+                    event.original_event.duration_ms.min(100.0),
+                    (velocity as f32 * vscale) as u8,
+                    None,
+                    Some(event.original_event.id),
+                ));
             }
 
             EventClass::HihatNoise => {
@@ -372,27 +410,45 @@ pub fn arrange_events(
                     event.original_event.features.peak_amplitude,
                 );
 
-                // 1. Classic hi-hat placement
-                if should_place_hihat(&event.grid_position, &rules.hihat_density) {
-                    hihat_lane.add_note(ArrangedNote::from_quantized_event(event, velocity));
-                }
+                // Hi-hats have no fixed template slots — they place at their
+                // quantized time (identity). Density is a VELOCITY SHAPER, never a
+                // gate: hats that fall outside the template density are ghosted
+                // (scaled by 0.35 + 0.65*fidelity) rather than deleted.
+                let (placed_time, _) = place_event(timestamp, &[], grid, fidelity);
+                let hat_velocity = if should_place_hihat(&event.grid_position, &rules.hihat_density)
+                {
+                    velocity
+                } else {
+                    (velocity as f32 * (0.35 + 0.65 * fidelity)) as u8
+                };
 
-                // 2. Rhythmic Puppeteering (Arpeggios)
-                // If template is ArpDrive, hi-hats advance the arpeggiator
+                hihat_lane.add_note(ArrangedNote::new(
+                    placed_time,
+                    event.original_event.duration_ms.min(100.0),
+                    hat_velocity,
+                    None,
+                    Some(event.original_event.id),
+                ));
+
+                // Rhythmic Puppeteering (Arpeggios): if template is ArpDrive, every
+                // hi-hat advances the arpeggiator and spawns a note at placed_time.
                 if *template == ArrangementTemplate::ArpDrive {
-                    let arp_sequence = arp_notes(&current_chord, &theme.arp_pattern, theme.arp_octave_range);
+                    let chord_type = theme.get_chord_at_time(placed_time, grid);
+                    let current_chord = chord_notes(theme.root_note, &chord_type, &scale);
+                    let arp_sequence =
+                        arp_notes(&current_chord, &theme.arp_pattern, theme.arp_octave_range);
                     if !arp_sequence.is_empty() {
                         let note_index = arp_counter % arp_sequence.len();
                         let arp_note = arp_sequence[note_index];
-                        
+
                         arp_lane.add_note(ArrangedNote::new(
-                            timestamp,
+                            placed_time,
                             150.0, // Short, plucky arpeggio duration
                             (velocity as f32 * 0.9) as u8,
                             Some(arp_note),
                             Some(event.original_event.id),
                         ));
-                        
+
                         arp_counter += 1;
                     }
                 }
@@ -405,12 +461,18 @@ pub fn arrange_events(
                     event.original_event.features.peak_amplitude,
                 );
 
+                // Pads have no template slots -> identity placement (they move only
+                // via quantization). Single placement drives the whole triad.
+                let (placed_time, _) = place_event(timestamp, &[], grid, fidelity);
                 let duration = event.original_event.duration_ms.max(400.0);
+
+                let chord_type = theme.get_chord_at_time(placed_time, grid);
+                let current_chord = chord_notes(theme.root_note, &chord_type, &scale);
 
                 // Add each note of the chord to the pad lane
                 for &note in &current_chord {
                     pad_lane.add_note(ArrangedNote::new(
-                        timestamp,
+                        placed_time,
                         duration,
                         (velocity as f32 * 0.8) as u8, // Slightly softer pads
                         Some(note),
@@ -421,13 +483,15 @@ pub fn arrange_events(
         }
     }
 
-    // Sort all lanes by time
-    kick_lane.sort_by_time();
-    snare_lane.sort_by_time();
-    hihat_lane.sort_by_time();
-    bass_lane.sort_by_time();
-    pad_lane.sort_by_time();
-    arp_lane.sort_by_time();
+    // Merge same-slot collisions per lane (louder wins) and sort by time. This is
+    // what makes fidelity 0.0 collapse two off-template hits landing on one slot
+    // into a single note instead of stacking duplicates.
+    merge_same_slot(&mut kick_lane);
+    merge_same_slot(&mut snare_lane);
+    merge_same_slot(&mut hihat_lane);
+    merge_same_slot(&mut bass_lane);
+    merge_same_slot(&mut pad_lane);
+    merge_same_slot(&mut arp_lane);
 
     // Add lanes to arrangement
     arrangement.add_drum_lane(kick_lane);
@@ -438,6 +502,106 @@ pub fn arrange_events(
     arrangement.arp_lane = Some(arp_lane);
 
     arrangement
+}
+
+/// Expand a template's per-bar positions into every absolute grid-slot time and
+/// return the one closest to `quantized_ms`. Returns `None` when the template has
+/// no positions or none map onto the grid.
+///
+/// Template positions store bar-relative (beat, subdivision); we replicate them
+/// across all `grid.bar_count` bars and index into the (phase-anchored)
+/// `beat_positions_ms`, so the returned slot already includes any phase offset.
+fn nearest_template_slot_ms(
+    quantized_ms: f64,
+    template_positions: &[GridPosition],
+    grid: &Grid,
+) -> Option<f64> {
+    let beats_per_bar = grid.time_signature.beats_per_bar();
+    let subs = grid.division.subdivisions_per_beat();
+    let mut best: Option<f64> = None;
+    for bar in 0..grid.bar_count {
+        for tp in template_positions {
+            let idx = ((bar * beats_per_bar + tp.beat) * subs + tp.subdivision) as usize;
+            if let Some(&t) = grid.beat_positions_ms.get(idx) {
+                if best.map_or(true, |b| (t - quantized_ms).abs() < (b - quantized_ms).abs()) {
+                    best = Some(t);
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Deterministic fidelity placement (spec §4.3). Returns `(final_time_ms,
+/// velocity_scale)`.
+///
+/// - Empty template (`hi-hats`, `pads`) or no reachable slot -> identity: play at
+///   `quantized_ms`, full velocity.
+/// - On-template hit -> play at `quantized_ms`, full velocity.
+/// - Off-template hit -> lerp toward the nearest slot by `(1 - fidelity)` and
+///   attenuate velocity by `1 - (1 - fidelity) * 0.4 * normalized_distance`, where
+///   distance is normalized against one subdivision (capped at 1).
+///
+/// Merging of same-slot collisions is a per-lane post-pass (`merge_same_slot`),
+/// not this function's job.
+fn place_event(
+    quantized_ms: f64,
+    template_positions: &[GridPosition],
+    grid: &Grid,
+    fidelity: f32,
+) -> (f64, f32) {
+    if template_positions.is_empty() {
+        return (quantized_ms, 1.0);
+    }
+    let Some(slot) = nearest_template_slot_ms(quantized_ms, template_positions, grid) else {
+        return (quantized_ms, 1.0);
+    };
+    if (slot - quantized_ms).abs() < 1e-6 {
+        return (quantized_ms, 1.0); // on-template
+    }
+    let f = fidelity.clamp(0.0, 1.0) as f64;
+    let final_ms = slot + (quantized_ms - slot) * f;
+    let subdivision_ms = if grid.bpm > 0.0 {
+        60000.0 / grid.bpm / grid.division.subdivisions_per_beat() as f64
+    } else {
+        1.0
+    };
+    let norm_dist = ((quantized_ms - slot).abs() / subdivision_ms).min(1.0) as f32;
+    (final_ms, 1.0 - (1.0 - fidelity) * 0.4 * norm_dist)
+}
+
+/// Merge notes that land on the same slot (same time within 1e-6) AND same pitch,
+/// keeping the louder one. Deterministic tie-break: the note whose source event id
+/// is lexicographically smaller wins. Different pitches at the same time (e.g. a
+/// pad triad) are preserved. Leaves the lane sorted by time.
+fn merge_same_slot(lane: &mut DrumLane) {
+    lane.sort_by_time();
+    let mut merged: Vec<ArrangedNote> = Vec::with_capacity(lane.events.len());
+    for note in lane.events.drain(..) {
+        if let Some(existing) = merged.iter_mut().find(|e| {
+            (e.timestamp_ms - note.timestamp_ms).abs() < 1e-6 && e.midi_note == note.midi_note
+        }) {
+            let takes_priority = note.velocity > existing.velocity
+                || (note.velocity == existing.velocity
+                    && source_id_precedes(note.source_event_id, existing.source_event_id));
+            if takes_priority {
+                *existing = note;
+            }
+        } else {
+            merged.push(note);
+        }
+    }
+    lane.events = merged;
+}
+
+/// Deterministic tie-break: is `a` a "smaller" source id than `b`? `Some` before
+/// `None`; among `Some`s, the smaller `Uuid` (lexicographic on its 128-bit value).
+fn source_id_precedes(a: Option<Uuid>, b: Option<Uuid>) -> bool {
+    match (a, b) {
+        (Some(x), Some(y)) => x < y,
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
 }
 
 /// Calculate MIDI velocity based on confidence and peak amplitude
@@ -458,32 +622,9 @@ fn calculate_velocity(confidence: f32, peak_amplitude: f32) -> u8 {
     (velocity as u8).clamp(1, 127)
 }
 
-/// Check if an event should be placed on a specific beat based on template positions
-fn should_place_on_beat(
-    position: &GridPosition,
-    template_positions: &[GridPosition],
-    grid: &Grid,
-) -> bool {
-    if template_positions.is_empty() {
-        return true; // If no template positions, allow all
-    }
-
-    // Check if this position matches any template position (modulo bar)
-    let beats_per_bar = grid.time_signature.beats_per_bar();
-
-    for template_pos in template_positions {
-        // Check if beat and subdivision match (ignore bar number for pattern repetition)
-        if position.beat % beats_per_bar == template_pos.beat % beats_per_bar
-            && position.subdivision == template_pos.subdivision
-        {
-            return true;
-        }
-    }
-
-    false
-}
-
-/// Check if a hi-hat should be placed based on density rules
+/// Check whether a hi-hat falls within the template's density pattern. This is no
+/// longer a gate — off-density hats still play (ghosted); it only decides which
+/// hats get full velocity vs. attenuated velocity in `arrange_events`.
 fn should_place_hihat(position: &GridPosition, density: &HihatDensity) -> bool {
     match density {
         HihatDensity::Sparse => {
@@ -527,6 +668,181 @@ mod tests {
         }
     }
 
+    /// Expand a template's kick positions into absolute slot times across all bars.
+    /// Mirrors `nearest_template_slot_ms`'s indexing so tests can assert notes land
+    /// on real template slots.
+    fn template_slot_times(grid: &Grid, template: &ArrangementTemplate) -> Vec<f64> {
+        let positions = template.rules().kick_positions;
+        let beats_per_bar = grid.time_signature.beats_per_bar();
+        let subs = grid.division.subdivisions_per_beat();
+        let mut out = Vec::new();
+        for bar in 0..grid.bar_count {
+            for tp in &positions {
+                let idx = ((bar * beats_per_bar + tp.beat) * subs + tp.subdivision) as usize;
+                if let Some(&t) = grid.beat_positions_ms.get(idx) {
+                    out.push(t);
+                }
+            }
+        }
+        out
+    }
+
+    /// Four kick events placed OFF every template kick position (which for
+    /// SynthwaveStraight live on beat 1 and beat 3, subdivision 0). Each sits on a
+    /// real grid subdivision so it is already "quantized". Returns (events, grid, theme).
+    fn off_template_kicks_fixture() -> (Vec<QuantizedEvent>, Grid, crate::themes::Theme) {
+        let grid = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Sixteenth, 2);
+        let theme = crate::themes::get_theme("BLADE RUNNER").unwrap();
+
+        // 120 BPM sixteenths => 125ms per subdivision, 500ms per beat.
+        // Template kick slots: t = 0, 1000, 2000, 3000. All four below avoid them.
+        let times = [125.0, 750.0, 1125.0, 1875.0];
+        let events = times
+            .iter()
+            .map(|&t| {
+                let gp = grid.get_grid_position(t);
+                create_quantized_event(create_test_event(t, EventClass::BilabialPlosive), gp)
+            })
+            .collect();
+
+        (events, grid, theme)
+    }
+
+    #[test]
+    fn fidelity_one_keeps_every_event() {
+        let (events, grid, theme) = off_template_kicks_fixture();
+        let arr = arrange_events(
+            &events,
+            &ArrangementTemplate::SynthwaveStraight,
+            &grid,
+            &theme,
+            0.6,
+            1.0,
+        );
+        let kick = arr.drum_lanes.iter().find(|l| l.name == "DRUMS_KICK").unwrap();
+        assert_eq!(kick.events.len(), 4, "today: 0 — all gated away");
+        for (n, e) in kick.events.iter().zip(&events) {
+            assert!((n.timestamp_ms - e.quantized_timestamp_ms).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn fidelity_zero_moves_and_merges_never_deletes() {
+        let (events, grid, theme) = off_template_kicks_fixture();
+        let arr = arrange_events(
+            &events,
+            &ArrangementTemplate::SynthwaveStraight,
+            &grid,
+            &theme,
+            0.6,
+            0.0,
+        );
+        let kick = arr.drum_lanes.iter().find(|l| l.name == "DRUMS_KICK").unwrap();
+        assert!(!kick.events.is_empty());
+        let slots = template_slot_times(&grid, &ArrangementTemplate::SynthwaveStraight);
+        for n in &kick.events {
+            assert!(
+                slots.iter().any(|s| (s - n.timestamp_ms).abs() < 1e-6),
+                "note at {} not on a template slot",
+                n.timestamp_ms
+            );
+        }
+    }
+
+    #[test]
+    fn arrangement_is_deterministic() {
+        let (events, grid, theme) = off_template_kicks_fixture();
+        let a = arrange_events(
+            &events,
+            &ArrangementTemplate::SynthwaveStraight,
+            &grid,
+            &theme,
+            0.6,
+            0.5,
+        );
+        let b = arrange_events(
+            &events,
+            &ArrangementTemplate::SynthwaveStraight,
+            &grid,
+            &theme,
+            0.6,
+            0.5,
+        );
+        assert_eq!(
+            serde_json::to_string(&a).unwrap(),
+            serde_json::to_string(&b).unwrap()
+        );
+    }
+
+    #[test]
+    fn hihat_density_shapes_velocity_never_deletes() {
+        // Sparse density (SynthwaveHalftime) would previously drop off-beat hats.
+        // Now every hat survives; off-density hats are ghosted at low fidelity.
+        let grid = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Sixteenth, 1);
+        let theme = crate::themes::get_theme("BLADE RUNNER").unwrap();
+        // Hats on off-beats (subdivision != 0) — fail the Sparse density check.
+        let events: Vec<QuantizedEvent> = [125.0, 375.0, 625.0]
+            .iter()
+            .map(|&t| {
+                let gp = grid.get_grid_position(t);
+                create_quantized_event(create_test_event(t, EventClass::HihatNoise), gp)
+            })
+            .collect();
+
+        let full = arrange_events(
+            &events,
+            &ArrangementTemplate::SynthwaveHalftime,
+            &grid,
+            &theme,
+            0.6,
+            1.0,
+        );
+        let hats_full = full.drum_lanes.iter().find(|l| l.name == "DRUMS_HIHAT").unwrap();
+        assert_eq!(hats_full.events.len(), 3, "hats must never be deleted");
+
+        let ghost = arrange_events(
+            &events,
+            &ArrangementTemplate::SynthwaveHalftime,
+            &grid,
+            &theme,
+            0.6,
+            0.0,
+        );
+        let hats_ghost = ghost.drum_lanes.iter().find(|l| l.name == "DRUMS_HIHAT").unwrap();
+        assert_eq!(hats_ghost.events.len(), 3, "hats must never be deleted");
+        // At fidelity 0.0 off-density hats are ghosted (0.35x) vs full (1.0x).
+        for (g, f) in hats_ghost.events.iter().zip(&hats_full.events) {
+            assert!(g.velocity < f.velocity, "ghosted hat should be quieter");
+        }
+    }
+
+    #[test]
+    fn bass_follows_moved_kick() {
+        // Single-placement rule: the bass note spawned by a kick must sit at the
+        // SAME placed time as the kick, not the raw quantized time.
+        let (events, grid, theme) = off_template_kicks_fixture();
+        let arr = arrange_events(
+            &events,
+            &ArrangementTemplate::SynthwaveStraight,
+            &grid,
+            &theme,
+            0.8, // b_emphasis high => bass fires
+            0.0, // fidelity 0 => kicks move to template slots
+        );
+        let kick = arr.drum_lanes.iter().find(|l| l.name == "DRUMS_KICK").unwrap();
+        let bass = arr.bass_lane.as_ref().unwrap();
+        assert!(!bass.events.is_empty());
+        // Every bass note time must coincide with a kick note time (same placement).
+        let kick_times: Vec<f64> = kick.events.iter().map(|n| n.timestamp_ms).collect();
+        for b in &bass.events {
+            assert!(
+                kick_times.iter().any(|k| (k - b.timestamp_ms).abs() < 1e-6),
+                "bass at {} desynced from kick placement",
+                b.timestamp_ms
+            );
+        }
+    }
+
     #[test]
     fn test_drum_lane_creation() {
         let mut lane = DrumLane::new("TEST_KICK", MIDI_KICK);
@@ -553,32 +869,6 @@ mod tests {
         //   factor = 0.9 * 0.3 + 0.2 * 0.7 = 0.27 + 0.14 = 0.41
         //   velocity = 60 + 0.41 * 67 = 60 + 27.47 = 87
         assert_eq!(calculate_velocity(0.9, 0.2), 87);
-    }
-
-    #[test]
-    fn test_should_place_on_beat() {
-        let grid = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Quarter, 4);
-
-        let template_positions = vec![
-            GridPosition { bar: 0, beat: 0, subdivision: 0 }, // Beat 1
-            GridPosition { bar: 0, beat: 2, subdivision: 0 }, // Beat 3
-        ];
-
-        // Should match beat 0 (beat 1)
-        let pos1 = GridPosition { bar: 0, beat: 0, subdivision: 0 };
-        assert!(should_place_on_beat(&pos1, &template_positions, &grid));
-
-        // Should match beat 2 (beat 3)
-        let pos2 = GridPosition { bar: 0, beat: 2, subdivision: 0 };
-        assert!(should_place_on_beat(&pos2, &template_positions, &grid));
-
-        // Should NOT match beat 1 (beat 2)
-        let pos3 = GridPosition { bar: 0, beat: 1, subdivision: 0 };
-        assert!(!should_place_on_beat(&pos3, &template_positions, &grid));
-
-        // Should match in next bar (pattern repeats)
-        let pos4 = GridPosition { bar: 1, beat: 0, subdivision: 0 };
-        assert!(should_place_on_beat(&pos4, &template_positions, &grid));
     }
 
     #[test]
@@ -616,7 +906,7 @@ mod tests {
             ),
         ];
 
-        let arrangement = arrange_events(&events, &template, &grid, &theme, 0.5);
+        let arrangement = arrange_events(&events, &template, &grid, &theme, 0.5, 0.8);
 
         // Should have drum lanes
         assert!(arrangement.drum_lanes.len() >= 3);
@@ -644,12 +934,12 @@ mod tests {
         ];
 
         // High b_emphasis should trigger bass
-        let arrangement_high = arrange_events(&events, &template, &grid, &theme, 0.8);
+        let arrangement_high = arrange_events(&events, &template, &grid, &theme, 0.8, 0.8);
         assert!(arrangement_high.bass_lane.is_some());
         assert!(!arrangement_high.bass_lane.as_ref().unwrap().events.is_empty());
 
         // Low b_emphasis should not trigger bass
-        let arrangement_low = arrange_events(&events, &template, &grid, &theme, 0.2);
+        let arrangement_low = arrange_events(&events, &template, &grid, &theme, 0.2, 0.8);
         assert!(arrangement_low.bass_lane.is_some());
         assert_eq!(arrangement_low.bass_lane.as_ref().unwrap().events.len(), 0);
     }
@@ -676,7 +966,7 @@ mod tests {
             ),
         ];
 
-        let arrangement = arrange_events(&events, &template, &grid, &theme, 0.5);
+        let arrangement = arrange_events(&events, &template, &grid, &theme, 0.5, 0.8);
 
         // Arp lane should exist and have 3 notes
         assert!(arrangement.arp_lane.is_some());

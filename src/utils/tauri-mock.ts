@@ -85,6 +85,13 @@ function buildMockArrangement(args: Record<string, any>): unknown {
   const bpm = args?.input?.bpm || 120;
   const barCount = args?.input?.bar_count || 4;
   const phaseOffsetMs = args?.input?.phase_offset_ms ?? 0;
+  // Placement fidelity (spec §4.3, serde default 0.8 in ArrangeEventsInput). The
+  // mock has never template-gated — it pushes every detected event into its lane —
+  // so it already matches the Rust arranger's "never delete" contract at fidelity
+  // 1.0. Off-template slot-snapping (fidelity < 1.0) is a real-backend nicety not
+  // reproduced here; the browser demo simply plays events where they land.
+  const _fidelity = args?.input?.fidelity ?? 0.8;
+  void _fidelity;
   const totalDurationMs = (barCount * 4 * 60000) / bpm;
   const template = args?.input?.template || 'synthwave_straight';
 

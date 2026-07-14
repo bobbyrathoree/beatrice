@@ -43,6 +43,13 @@ export interface PipelineParams {
   swing: number;
   quantize: number;
   bEmphasis: number;
+  /**
+   * Placement fidelity [0.0, 1.0] (spec §4.3). 1.0 = play every event where the
+   * performer put it; 0.0 = snap off-template hits to the nearest template slot.
+   * Never deletes events. The interactive slider lands in Task 4; for now this is
+   * a constant threaded through the arranger call.
+   */
+  fidelity: number;
 }
 
 interface BeatriceState {
@@ -78,6 +85,7 @@ const defaultPipelineParams: PipelineParams = {
   swing: 0.0,
   quantize: 0.8,
   bEmphasis: 0.6,
+  fidelity: 0.8,
 };
 
 export const useStore = create<BeatriceState>((set) => ({

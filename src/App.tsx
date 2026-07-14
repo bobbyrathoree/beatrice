@@ -271,6 +271,7 @@ function App() {
           swing_amount: gridSettings.swing_amount,
           bar_count: gridSettings.bar_count,
           b_emphasis: pipelineParams.bEmphasis,
+          fidelity: pipelineParams.fidelity,
           phase_offset_ms: tempoResult.phase_offset_ms,
         })
         .then(unwrap)
@@ -387,6 +388,7 @@ function App() {
           swing_amount: gridSettings.swing_amount,
           bar_count: gridSettings.bar_count,
           b_emphasis: pipelineParams.bEmphasis,
+          fidelity: pipelineParams.fidelity,
           phase_offset_ms: pipelineResult.tempo?.phase_offset_ms ?? 0,
         })
       );
@@ -577,6 +579,7 @@ function App() {
               swing_amount: run.swing,
               bar_count: gridSettings.bar_count,
               b_emphasis: run.b_emphasis,
+              fidelity: pipelineParams.fidelity,
               phase_offset_ms: run.phase_offset_ms,
             })
           );

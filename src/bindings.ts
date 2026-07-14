@@ -313,7 +313,14 @@ export type ArrangeEventsInput = { events: QuantizedEvent[]; template: string; t
  * (chord boundaries, beat placement) to the performer's downbeat. Defaults to
  * 0.0 for back-compat.
  */
-phase_offset_ms?: number | null }
+phase_offset_ms?: number | null; 
+/**
+ * Placement fidelity [0.0, 1.0] (spec §4.3). 1.0 "Follow me" plays every event
+ * at its quantized position (templates only shape velocity); 0.0 "Produce for
+ * me" snaps off-template hits to the nearest template slot. Never deletes
+ * events. Defaults to 0.8 (the UI slider lands in Task 4).
+ */
+fidelity?: number }
 /**
  * An arranged note with timing and MIDI parameters
  */

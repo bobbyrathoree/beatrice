@@ -67,7 +67,8 @@ fn main() {
     }
 
     let theme = beatrice_lib::themes::get_theme("BLADE RUNNER").expect("Theme not found");
-    let arr = arranger::arrange_events(&quantized, &ArrangementTemplate::SynthwaveStraight, &grid, &theme, 0.6);
+    // Default fidelity 0.8 matches the ArrangeEventsInput serde default.
+    let arr = arranger::arrange_events(&quantized, &ArrangementTemplate::SynthwaveStraight, &grid, &theme, 0.6, 0.8);
     let total: usize = arr.all_lanes().iter().map(|l| l.events.len()).sum();
     println!("\n=== ARRANGEMENT ({} notes) ===", total);
     let note_names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];

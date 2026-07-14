@@ -734,6 +734,17 @@ pub struct ArrangeEventsInput {
     /// 0.0 for back-compat.
     #[serde(default)]
     pub phase_offset_ms: Option<f64>,
+    /// Placement fidelity [0.0, 1.0] (spec §4.3). 1.0 "Follow me" plays every event
+    /// at its quantized position (templates only shape velocity); 0.0 "Produce for
+    /// me" snaps off-template hits to the nearest template slot. Never deletes
+    /// events. Defaults to 0.8 (the UI slider lands in Task 4).
+    #[serde(default = "default_fidelity")]
+    pub fidelity: f32,
+}
+
+/// Default placement fidelity when the frontend omits it (serde back-compat).
+fn default_fidelity() -> f32 {
+    0.8
 }
 
 /// Arrange quantized events into a musical arrangement
@@ -794,7 +805,8 @@ pub fn arrange_events_command(input: ArrangeEventsInput) -> CommandResult<Arrang
         &template,
         &grid,
         &theme,
-        input.b_emphasis
+        input.b_emphasis,
+        input.fidelity,
     );
 
     // Expand base pattern into full song (Intro/Build/Drop/Outro)
