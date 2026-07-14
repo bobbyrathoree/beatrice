@@ -2,7 +2,7 @@
 // Classifies beatbox events using hand-crafted feature rules
 // MVP implementation before ML-based classification
 
-use crate::events::types::{EventClass, EventFeatures};
+use crate::events::types::{ClassScore, EventClass, EventFeatures};
 
 /// Classification result with confidence scores for each class
 #[derive(Debug, Clone)]
@@ -15,6 +15,17 @@ pub struct ClassificationResult {
 
     /// Confidence scores for all classes (for debugging/visualization)
     pub all_scores: [(EventClass, f32); 4],
+}
+
+impl ClassificationResult {
+    /// Convert the fixed-size score array into a `Vec<ClassScore>` suitable for
+    /// threading through `Event`/`EventDecision` and out to the UI.
+    pub fn class_scores(&self) -> Vec<ClassScore> {
+        self.all_scores
+            .iter()
+            .map(|&(class, score)| ClassScore { class, score })
+            .collect()
+    }
 }
 
 /// Rule-based classifier using spectral and temporal features

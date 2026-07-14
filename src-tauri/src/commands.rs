@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::arranger::{self, ArrangementTemplate, Arrangement, MidiExportOptions};
 use crate::audio::{self, OnsetConfig};
-use crate::events::{self, Event, EventClass, EventDecision, EventFeatures};
+use crate::events::{self, ClassScore, Event, EventClass, EventDecision, EventFeatures};
 use crate::groove::{self, TempoEstimate, Grid, GridDivision, GrooveFeel, TimeSignature, QuantizeSettings, QuantizedEvent};
 use crate::pipeline::{TraceBuilder, TraceWriter};
 use crate::state::{
@@ -385,6 +385,10 @@ pub struct EventData {
     pub class: String,
     pub confidence: f32,
     pub features: EventFeatures,
+    /// Per-class classifier scores. `serde(default)` so older callers/rows that
+    /// predate score threading still deserialize (empty vec).
+    #[serde(default)]
+    pub all_scores: Vec<ClassScore>,
 }
 
 #[derive(Debug, Deserialize, specta::Type)]
@@ -525,17 +529,21 @@ pub async fn detect_events(
         let features =
             audio::extract_features_for_window(&audio, onset.timestamp_ms, window_duration_ms);
 
-        // Classify using appropriate classifier
-        let (class, confidence) = if let Some(ref knn) = classifier {
-            knn.classify(&features).unwrap_or((EventClass::Click, 0.5))
+        // Classify using appropriate classifier. The heuristic path also
+        // yields per-class scores that we thread through for explainability;
+        // the KNN path does not expose them (left empty).
+        let (class, confidence, class_scores) = if let Some(ref knn) = classifier {
+            let (class, confidence) = knn.classify(&features).unwrap_or((EventClass::Click, 0.5));
+            (class, confidence, Vec::new())
         } else if let Some(ref h) = heuristic {
             let result = h.classify(&features);
-            (result.class, result.confidence)
+            (result.class, result.confidence, result.class_scores())
         } else {
-            (EventClass::Click, 0.5) // Fallback
+            (EventClass::Click, 0.5, Vec::new()) // Fallback
         };
 
-        let event = Event::new(onset.timestamp_ms, duration_ms, class, confidence, features);
+        let event = Event::new(onset.timestamp_ms, duration_ms, class, confidence, features)
+            .with_scores(class_scores);
         events.push(event);
 
         // Progress trace
@@ -570,6 +578,7 @@ pub async fn detect_events(
             class: e.class.to_string().to_string(),
             confidence: e.confidence,
             features: e.features.clone(),
+            all_scores: e.all_scores.clone(),
         })
         .collect();
 
@@ -705,6 +714,7 @@ pub fn quantize_events_command(input: QuantizeEventsInput) -> CommandResult<Vec<
                 class: EventClass::from_string(&e.class),
                 confidence: e.confidence,
                 features: e.features.clone(),
+                all_scores: e.all_scores.clone(),
             }
         })
         .collect();
@@ -947,6 +957,7 @@ pub fn save_event_decisions(
             class: EventClass::from_string(&event_data.class),
             confidence: event_data.confidence,
             features: event_data.features.clone(),
+            all_scores: event_data.all_scores.clone(),
         };
 
         let quantized = quantized_lookup.get(&id).copied();

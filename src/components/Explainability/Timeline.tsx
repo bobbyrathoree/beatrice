@@ -1,15 +1,38 @@
 import { motion } from 'framer-motion';
 import { EventDecision, EVENT_CLASS_COLORS } from '../../types/explainability';
+import type { EventClass } from '../../bindings';
+
+/**
+ * A single arranged note projected onto the timeline. `source_event_id` links it
+ * back to the detected input event that produced it, so the two lanes can be
+ * visually connected (same colour + a connector line) — the "it follows YOU" story.
+ */
+export interface ArrangedTimelineNote {
+  timestamp_ms: number;
+  source_event_id: string | null;
+  /** Resolved from the source event, used for colouring. */
+  class: EventClass | null;
+  lane_name: string;
+}
 
 interface TimelineProps {
   events: EventDecision[];
   onEventClick: (eventId: string) => void;
   maxDuration?: number; // Duration in ms for timeline width
+  /** Arranged notes (output lane). When provided, an input-vs-arrangement A/B view renders. */
+  arrangedNotes?: ArrangedTimelineNote[];
 }
 
-export function Timeline({ events, onEventClick, maxDuration }: TimelineProps) {
-  // Calculate max duration if not provided
-  const duration = maxDuration || Math.max(...events.map(e => e.quantized_timestamp_ms), 1000);
+export function Timeline({ events, onEventClick, maxDuration, arrangedNotes }: TimelineProps) {
+  // Calculate max duration if not provided. Consider both input (original) and
+  // arranged timestamps so nothing falls off the right edge.
+  const duration =
+    maxDuration ||
+    Math.max(
+      ...events.map((e) => e.timestamp_ms),
+      ...(arrangedNotes?.map((n) => n.timestamp_ms) ?? []),
+      1000
+    );
 
   // Format time as MM:SS.sss
   const formatTime = (ms: number): string => {
@@ -25,6 +48,12 @@ export function Timeline({ events, onEventClick, maxDuration }: TimelineProps) {
   for (let i = 0; i <= duration; i += markerInterval) {
     timeMarkers.push(i);
   }
+
+  const showArrangement = !!arrangedNotes && arrangedNotes.length > 0;
+
+  // Lane vertical positions inside the SVG connector overlay (0-100 space).
+  const INPUT_Y = 22;
+  const OUTPUT_Y = 78;
 
   return (
     <motion.div
@@ -96,88 +125,188 @@ export function Timeline({ events, onEventClick, maxDuration }: TimelineProps) {
       <div style={{
         position: 'relative',
         width: '100%',
-        minHeight: '120px',
         border: '3px solid #000',
         borderRadius: '4px',
         backgroundColor: '#F8F8F8',
         padding: '20px 16px',
       }}>
-        {/* Timeline Bar */}
-        <div style={{
-          position: 'relative',
-          height: '40px',
-          backgroundColor: '#000',
-          borderRadius: '2px',
-        }}>
-          {/* Event Markers */}
-          {events.map((event, index) => {
-            const position = (event.quantized_timestamp_ms / duration) * 100;
-            const color = EVENT_CLASS_COLORS[event.class];
-            const size = 8 + (event.confidence * 16); // Size based on confidence (8-24px)
-            const opacity = 0.3 + (event.confidence * 0.7); // Opacity based on confidence (0.3-1.0)
+        {/* Two-lane A/B region: YOU (input) on top, ARRANGEMENT (output) below,
+            wired by source_event_id so the "follows you" story is visible. */}
+        <div
+          data-testid="timeline-lanes"
+          style={{
+            position: 'relative',
+            width: '100%',
+            height: showArrangement ? '160px' : '60px',
+          }}
+        >
+          {/* Connector overlay: lines from each input event to the arranged
+              notes it produced (matched by source_event_id). Drawn in a 0-100
+              coordinate space so percentage x-positions map directly. */}
+          {showArrangement && (
+            <svg
+              data-testid="timeline-connectors"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+                zIndex: 1,
+              }}
+            >
+              {arrangedNotes!.map((note, i) => {
+                if (!note.source_event_id) return null;
+                const src = events.find((e) => e.event_id === note.source_event_id);
+                if (!src) return null;
+                const x1 = (src.timestamp_ms / duration) * 100;
+                const x2 = (note.timestamp_ms / duration) * 100;
+                const color = note.class ? EVENT_CLASS_COLORS[note.class] : '#999';
+                return (
+                  <line
+                    key={`conn-${i}`}
+                    x1={x1}
+                    y1={INPUT_Y}
+                    x2={x2}
+                    y2={OUTPUT_Y}
+                    stroke={color}
+                    strokeWidth={0.4}
+                    strokeOpacity={0.55}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                );
+              })}
+            </svg>
+          )}
 
-            return (
-              <motion.div
-                key={event.event_id}
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: index * 0.02 }}
-                whileHover={{
-                  scale: 1.5,
-                  zIndex: 10,
-                }}
-                onClick={() => onEventClick(event.event_id)}
-                style={{
-                  position: 'absolute',
-                  left: `${position}%`,
-                  top: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  width: `${size}px`,
-                  height: `${size}px`,
-                  backgroundColor: color,
-                  border: '2px solid #000',
-                  borderRadius: '50%',
-                  opacity,
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
-                }}
-              >
-                {/* Quantization adjustment arrow */}
-                {Math.abs(event.snap_delta_ms) > 10 && (
+          {/* --- INPUT LANE (YOU) --- */}
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: showArrangement ? '30px' : '40px',
+            zIndex: 2,
+          }}>
+            {showArrangement && (
+              <span style={{
+                position: 'absolute',
+                left: 0,
+                top: '-16px',
+                fontSize: '10px',
+                fontWeight: 'bold',
+                letterSpacing: '1px',
+                color: '#000',
+              }}>
+                YOU (INPUT)
+              </span>
+            )}
+            <div style={{
+              position: 'relative',
+              height: '100%',
+              backgroundColor: '#000',
+              borderRadius: '2px',
+            }}>
+              {events.map((event, index) => {
+                // Input lane uses the ORIGINAL (pre-quantize) timestamp.
+                const position = (event.timestamp_ms / duration) * 100;
+                const color = EVENT_CLASS_COLORS[event.class];
+                const size = 8 + (event.confidence * 12); // 8-20px by confidence
+                const opacity = 0.4 + (event.confidence * 0.6);
+
+                return (
                   <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 0.6 }}
+                    key={event.event_id}
+                    data-testid="timeline-input-marker"
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ delay: index * 0.02 }}
+                    whileHover={{ scale: 1.5, zIndex: 10 }}
+                    onClick={() => onEventClick(event.event_id)}
+                    title={`Detected ${event.class} @ ${formatTime(event.timestamp_ms)}`}
                     style={{
                       position: 'absolute',
+                      left: `${position}%`,
                       top: '50%',
-                      left: event.snap_delta_ms > 0 ? 'auto' : '50%',
-                      right: event.snap_delta_ms > 0 ? '50%' : 'auto',
-                      transform: 'translateY(-50%)',
-                      width: `${Math.abs((event.snap_delta_ms / duration) * 100) * 10}px`,
-                      height: '2px',
+                      transform: 'translate(-50%, -50%)',
+                      width: `${size}px`,
+                      height: `${size}px`,
                       backgroundColor: color,
-                      pointerEvents: 'none',
+                      border: '2px solid #000',
+                      borderRadius: '50%',
+                      opacity,
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
                     }}
-                  >
-                    {/* Arrow head */}
-                    <div style={{
-                      position: 'absolute',
-                      right: event.snap_delta_ms > 0 ? 0 : 'auto',
-                      left: event.snap_delta_ms > 0 ? 'auto' : 0,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      width: 0,
-                      height: 0,
-                      borderTop: '3px solid transparent',
-                      borderBottom: '3px solid transparent',
-                      borderLeft: event.snap_delta_ms > 0 ? 'none' : `4px solid ${color}`,
-                      borderRight: event.snap_delta_ms > 0 ? `4px solid ${color}` : 'none',
-                    }} />
-                  </motion.div>
-                )}
-              </motion.div>
-            );
-          })}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* --- OUTPUT LANE (ARRANGEMENT) --- */}
+          {showArrangement && (
+            <div style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: '30px',
+              zIndex: 2,
+            }}>
+              <span style={{
+                position: 'absolute',
+                left: 0,
+                top: '-16px',
+                fontSize: '10px',
+                fontWeight: 'bold',
+                letterSpacing: '1px',
+                color: '#000',
+              }}>
+                ARRANGEMENT (OUTPUT)
+              </span>
+              <div style={{
+                position: 'relative',
+                height: '100%',
+                backgroundColor: '#000',
+                borderRadius: '2px',
+              }}>
+                {arrangedNotes!.map((note, i) => {
+                  const position = (note.timestamp_ms / duration) * 100;
+                  const color = note.class ? EVENT_CLASS_COLORS[note.class] : '#999';
+                  return (
+                    <motion.div
+                      key={`note-${i}`}
+                      data-testid="timeline-output-marker"
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ delay: i * 0.01 }}
+                      whileHover={{ scale: 1.4, zIndex: 10 }}
+                      onClick={() =>
+                        note.source_event_id && onEventClick(note.source_event_id)
+                      }
+                      title={`${note.lane_name} @ ${formatTime(note.timestamp_ms)}`}
+                      style={{
+                        position: 'absolute',
+                        left: `${position}%`,
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        width: '10px',
+                        height: '16px',
+                        backgroundColor: color,
+                        border: '2px solid #000',
+                        borderRadius: '2px',
+                        cursor: note.source_event_id ? 'pointer' : 'default',
+                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Time Labels */}
@@ -218,10 +347,9 @@ export function Timeline({ events, onEventClick, maxDuration }: TimelineProps) {
         color: '#666',
         fontWeight: 'normal',
       }}>
-        Click on any event marker to see detailed decision information.
-        Marker size and opacity indicate confidence level.
-        {events.some(e => Math.abs(e.snap_delta_ms) > 10) &&
-          ' Arrows show quantization adjustments.'}
+        {showArrangement
+          ? 'Top lane = your detected hits; bottom lane = the notes the arranger placed. Lines connect each note back to the hit that triggered it — the arrangement follows YOU. Click any marker for details.'
+          : 'Click on any event marker to see detailed decision information. Marker size and opacity indicate confidence level.'}
       </div>
     </motion.div>
   );

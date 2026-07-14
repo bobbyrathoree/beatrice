@@ -59,12 +59,26 @@ function generateMockEvents(audioBytes: number[]): any[] {
   for (let i = 0; i < numEvents; i++) {
     const timestamp = i * interval + (Math.random() * 20 - 10);
     const classIdx = i % classes.length;
+    const winnerClass = classes[classIdx];
+    const confidence = 0.7 + Math.random() * 0.25;
+
+    // Plausible per-class scores: the classified winner gets `confidence`, the
+    // rest get lower decaying scores. Mirrors the Rust `ClassScore[]` shape so
+    // the DecisionCard bars + runner-up reasoning render in browser demo mode.
+    const others = classes.filter((c) => c !== winnerClass);
+    const all_scores = [
+      { class: winnerClass, score: confidence },
+      { class: others[0], score: Math.max(0.05, confidence - 0.18) },
+      { class: others[1], score: Math.max(0.03, confidence - 0.4) },
+      { class: others[2], score: Math.max(0.02, confidence - 0.55) },
+    ];
+
     events.push({
       id: `mock-event-${i}`,
       timestamp_ms: Math.max(0, timestamp),
       duration_ms: 50 + Math.random() * 30,
-      class: classes[classIdx],
-      confidence: 0.7 + Math.random() * 0.25,
+      class: winnerClass,
+      confidence,
       features: {
         spectral_centroid: classIdx === 0 ? 400 : classIdx === 1 ? 4200 : classIdx === 2 ? 1800 : 600,
         zcr: classIdx === 0 ? 0.08 : classIdx === 1 ? 0.45 : classIdx === 2 ? 0.3 : 0.05,
@@ -73,6 +87,7 @@ function generateMockEvents(audioBytes: number[]): any[] {
         high_band_energy: classIdx === 0 ? 0.1 : classIdx === 1 ? 0.7 : classIdx === 2 ? 0.2 : 0.25,
         peak_amplitude: 0.5 + Math.random() * 0.4,
       },
+      all_scores,
     });
   }
 

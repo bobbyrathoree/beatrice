@@ -423,6 +423,24 @@ export type ChordProgression = { chords: ChordType[]; bars_per_chord: number }
  * Chord types by scale degree
  */
 export type ChordType = "I" | "II" | "III" | "IV" | "V" | "VI" | "VII" | "Im" | "IIm" | "IIIm" | "IVm" | "Vm" | "VIm" | "VIIm"
+/**
+ * Per-class classification score for a single event.
+ * 
+ * Carries the confidence the classifier assigned to one candidate class.
+ * A `Vec<ClassScore>` (one entry per class) is threaded end-to-end so the
+ * UI can show real score bars and name the actual runner-up, instead of a
+ * fixed reasoning template. Prefer this struct over a `(EventClass, f32)`
+ * tuple because it generates a clean `{ class, score }` TypeScript shape.
+ */
+export type ClassScore = { 
+/**
+ * The candidate event class this score is for.
+ */
+class: EventClass; 
+/**
+ * Confidence score for `class` in [0.0, 1.0].
+ */
+score: number }
 export type CommandError = { message: string }
 export type CreateArtifactInput = { run_id: string; kind: string; filename: string; data: number[] }
 export type CreateCalibrationProfileInput = { name: string; profile_data: number[]; notes: string | null }
@@ -485,7 +503,15 @@ confidence: number;
 /**
  * Extracted audio features used for classification
  */
-features: EventFeatures }
+features: EventFeatures; 
+/**
+ * Per-class confidence scores from the classifier (one entry per class).
+ * 
+ * Populated from `ClassificationResult.all_scores` so the explainability
+ * UI can render real score bars and name the actual runner-up. Defaults to
+ * empty for backward compatibility with older persisted rows (`serde(default)`).
+ */
+all_scores?: ClassScore[] }
 /**
  * Classification of detected beatbox events
  * Maps beatbox sounds to musical instruments/synthesis targets
@@ -515,7 +541,12 @@ export type EventClass =
  * Characteristics: Sustained energy, lower ZCR, periodic/harmonic content
  */
 "HumVoiced"
-export type EventData = { id: string; timestamp_ms: number; duration_ms: number; class: string; confidence: number; features: EventFeatures }
+export type EventData = { id: string; timestamp_ms: number; duration_ms: number; class: string; confidence: number; features: EventFeatures; 
+/**
+ * Per-class classifier scores. `serde(default)` so older callers/rows that
+ * predate score threading still deserialize (empty vec).
+ */
+all_scores?: ClassScore[] }
 /**
  * Complete decision information for a single event
  * showing how it moved through the pipeline
@@ -524,7 +555,12 @@ export type EventDecision = {
 /**
  * Original event ID
  */
-event_id: string; timestamp_ms: number; duration_ms: number; class: EventClass; confidence: number; features: EventFeatures; quantized_timestamp_ms: number | null; snap_delta_ms: number | null; grid_position: string | null; assigned_notes: AssignedNote[]; reasoning: string }
+event_id: string; timestamp_ms: number; duration_ms: number; class: EventClass; confidence: number; features: EventFeatures; quantized_timestamp_ms: number | null; snap_delta_ms: number | null; grid_position: string | null; assigned_notes: AssignedNote[]; 
+/**
+ * Per-class classifier scores, sorted descending (winner first). Empty for
+ * older persisted decisions that predate score threading (`serde(default)`).
+ */
+all_scores?: ClassScore[]; reasoning: string }
 export type EventDetectionResult = { events: EventData[]; total_count: number }
 /**
  * Spectral and temporal features extracted from an audio segment

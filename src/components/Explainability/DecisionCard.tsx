@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { EventDecision, EVENT_CLASS_NAMES, EVENT_CLASS_COLORS } from '../../types/explainability';
 import { useState, useEffect } from 'react';
 import { ModelInspector } from './ModelInspector';
+import type { EventClass } from '../../bindings';
 
 interface DecisionCardProps {
   event: EventDecision | null;
@@ -241,6 +242,95 @@ export function DecisionCard({ event, onClose }: DecisionCardProps) {
                 </div>
               </div>
             </section>
+
+            {/* Per-Class Scores — the real classifier output, sorted winner-first.
+                This replaces the old fixed template: every bar is a genuine score. */}
+            {event.all_scores && event.all_scores.length > 0 && (
+              <section>
+                <h4 style={{
+                  margin: '0 0 12px 0',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase',
+                  color: '#666',
+                }}>
+                  Class Scores
+                </h4>
+                <div
+                  data-testid="score-bars"
+                  style={{
+                    border: '3px solid #000',
+                    borderRadius: '4px',
+                    padding: '16px',
+                    backgroundColor: '#F8F8F8',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                  }}
+                >
+                  {[...event.all_scores]
+                    .sort((a, b) => b.score - a.score)
+                    .map((s, i) => {
+                      const isWinner = i === 0;
+                      const barColor = EVENT_CLASS_COLORS[s.class as EventClass];
+                      const pct = Math.round(s.score * 100);
+                      return (
+                        <div
+                          key={s.class}
+                          data-testid="score-bar"
+                          data-class={s.class}
+                          data-score={s.score}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                          }}
+                        >
+                          <span style={{
+                            width: '120px',
+                            fontSize: '13px',
+                            fontWeight: isWinner ? 'bold' : 'normal',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}>
+                            {EVENT_CLASS_NAMES[s.class as EventClass]}
+                          </span>
+                          <div style={{
+                            flex: 1,
+                            height: '18px',
+                            backgroundColor: 'rgba(0,0,0,0.1)',
+                            border: '2px solid #000',
+                            borderRadius: '2px',
+                            overflow: 'hidden',
+                          }}>
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${pct}%` }}
+                              transition={{ duration: 0.4, delay: i * 0.05 }}
+                              style={{
+                                height: '100%',
+                                backgroundColor: barColor,
+                                // Winner gets a bolder look via a subtle inner border.
+                                boxShadow: isWinner ? 'inset 0 0 0 2px #000' : 'none',
+                              }}
+                            />
+                          </div>
+                          <span style={{
+                            width: '44px',
+                            textAlign: 'right',
+                            fontFamily: 'monospace',
+                            fontWeight: isWinner ? 'bold' : 'normal',
+                            fontSize: '13px',
+                          }}>
+                            {pct}%
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </section>
+            )}
 
             {/* Arrangement Mapping */}
             <div style={{ flex: 1 }}>

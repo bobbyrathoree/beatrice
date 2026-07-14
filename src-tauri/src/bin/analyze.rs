@@ -50,7 +50,7 @@ fn main() {
         println!("  [{:2}] {:8.1}ms {:20} {:.0}%  c={:.0} z={:.3} lo={:.2} mi={:.2} hi={:.2} pk={:.2} cr={:.1}",
             i, onset.timestamp_ms, format!("{:?}", r.class), r.confidence*100.0,
             f.spectral_centroid, f.zcr, f.low_band_energy, f.mid_band_energy, f.high_band_energy, f.peak_amplitude, f.crest_factor);
-        events.push(events::Event::new(onset.timestamp_ms, dur, r.class, r.confidence, f));
+        events.push(events::Event::new(onset.timestamp_ms, dur, r.class, r.confidence, f).with_scores(r.class_scores()));
     }
 
     let tempo = groove::estimate_tempo(&onsets, audio.sample_rate);

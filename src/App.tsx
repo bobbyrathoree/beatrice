@@ -20,6 +20,7 @@ import { BEmphasisSlider } from "./components/BEmphasisSlider";
 import { FidelitySlider } from "./components/Groove/FidelitySlider";
 import { ExportControls } from "./components/ExportControls";
 import { Timeline } from "./components/Explainability/Timeline";
+import type { ArrangedTimelineNote } from "./components/Explainability/Timeline";
 import { ArrangementLanes } from "./components/Explainability/ArrangementLanes";
 import { DecisionCard } from "./components/Explainability/DecisionCard";
 import { Waveform } from "./components/Waveform";
@@ -30,6 +31,7 @@ import { useAudioPlayback } from "./hooks/useAudioPlayback";
 import type { Project, Run } from "./store/useStore";
 import type { ProjectSummary } from "./hooks/useProjects";
 import type { EventDecision } from "./types/explainability";
+import { EVENT_CLASS_NAMES } from "./types/explainability";
 import "./styles/brutalist.css";
 
 type AppState = "input" | "recording" | "processing" | "results";
@@ -550,6 +552,9 @@ function App() {
             class: d.class,
             confidence: d.confidence,
             features: d.features,
+            // Persisted per-class scores flow back so replayed runs show real
+            // score bars (empty for legacy rows via serde default).
+            all_scores: d.all_scores ?? [],
           }));
 
           // Rebuild quantized events + arrangement honestly from the saved params,
@@ -658,6 +663,13 @@ function App() {
       const confidence = event.confidence ?? 0.85;
       const className = event.class || 'BilabialPlosive';
 
+      // Real per-class scores from the classifier, sorted winner-first so the
+      // DecisionCard bars + runner-up reasoning reflect the actual model output
+      // rather than a fixed template.
+      const allScores = [...(event.all_scores ?? [])].sort((a, b) => b.score - a.score);
+      const runnerUp = allScores.length >= 2 ? allScores[1] : undefined;
+      const winner = allScores.length >= 1 ? allScores[0] : undefined;
+
       // Find notes triggered by this event in the arrangement
       const assigned_notes: AssignedNote[] = [];
       const arrangement = pipelineResult.arrangement;
@@ -684,6 +696,17 @@ function App() {
       checkLane(arrangement.pad_lane);
       checkLane(arrangement.arp_lane);
 
+      const reasoning =
+        winner && runnerUp
+          ? `Classified as ${EVENT_CLASS_NAMES[winner.class]} (${Math.round(
+              winner.score * 100
+            )}%), over runner-up ${EVENT_CLASS_NAMES[runnerUp.class]} (${Math.round(
+              runnerUp.score * 100
+            )}%). Triggered ${assigned_notes.length} instrument(s).`
+          : `Classified as ${className} based on audio features. Confidence: ${(
+              confidence * 100
+            ).toFixed(1)}%. Triggered ${assigned_notes.length} instrument(s).`;
+
       return {
         event_id: event.id || `event_${index}`,
         timestamp_ms: originalTimestamp,
@@ -693,11 +716,48 @@ function App() {
         class: className as EventDecision['class'],
         confidence,
         assigned_notes,
-        reasoning: `Classified as ${className} based on audio features. Confidence: ${(confidence * 100).toFixed(1)}%. Triggered ${assigned_notes.length} instrument(s).`,
+        all_scores: allScores,
+        reasoning,
         features,
       };
     });
   }, [pipelineResult]);
+
+  // Flatten every arranged note (across all lanes) into a single list projected
+  // onto the timeline, each tagged with the class of its source event. Powers the
+  // Timeline's input-vs-arrangement A/B lane ("the arrangement follows YOU").
+  const arrangedNotes = useMemo<ArrangedTimelineNote[]>(() => {
+    const arrangement = pipelineResult?.arrangement;
+    if (!arrangement) return [];
+
+    // event id -> class, so output markers inherit the input event's colour.
+    const classByEvent = new Map<string, EventDecision['class']>();
+    eventDecisions.forEach((d) => classByEvent.set(d.event_id, d.class));
+
+    const notes: ArrangedTimelineNote[] = [];
+    const collectLane = (lane: DrumLane | null) => {
+      if (!lane || !Array.isArray(lane.events)) return;
+      for (const note of lane.events) {
+        notes.push({
+          timestamp_ms: note.timestamp_ms,
+          source_event_id: note.source_event_id,
+          class: note.source_event_id
+            ? classByEvent.get(note.source_event_id) ?? null
+            : null,
+          lane_name: lane.name,
+        });
+      }
+    };
+
+    if (Array.isArray(arrangement.drum_lanes)) {
+      arrangement.drum_lanes.forEach(collectLane);
+    }
+    collectLane(arrangement.bass_lane);
+    collectLane(arrangement.pad_lane);
+    collectLane(arrangement.arp_lane);
+
+    return notes;
+  }, [pipelineResult?.arrangement, eventDecisions]);
 
   const handleEventClick = useCallback((eventId: string) => {
     setSelectedEventId(eventId);
@@ -912,6 +972,7 @@ function App() {
                   <Timeline
                     events={eventDecisions}
                     onEventClick={handleEventClick}
+                    arrangedNotes={arrangedNotes}
                     maxDuration={pipelineResult.arrangement?.total_duration_ms || undefined}
                   />
                 </motion.div>

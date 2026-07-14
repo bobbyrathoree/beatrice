@@ -63,6 +63,22 @@ impl EventClass {
     }
 }
 
+/// Per-class classification score for a single event.
+///
+/// Carries the confidence the classifier assigned to one candidate class.
+/// A `Vec<ClassScore>` (one entry per class) is threaded end-to-end so the
+/// UI can show real score bars and name the actual runner-up, instead of a
+/// fixed reasoning template. Prefer this struct over a `(EventClass, f32)`
+/// tuple because it generates a clean `{ class, score }` TypeScript shape.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
+pub struct ClassScore {
+    /// The candidate event class this score is for.
+    pub class: EventClass,
+
+    /// Confidence score for `class` in [0.0, 1.0].
+    pub score: f32,
+}
+
 /// Spectral and temporal features extracted from an audio segment
 /// Used for classification and calibration
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -152,6 +168,14 @@ pub struct Event {
 
     /// Extracted audio features used for classification
     pub features: EventFeatures,
+
+    /// Per-class confidence scores from the classifier (one entry per class).
+    ///
+    /// Populated from `ClassificationResult.all_scores` so the explainability
+    /// UI can render real score bars and name the actual runner-up. Defaults to
+    /// empty for backward compatibility with older persisted rows (`serde(default)`).
+    #[serde(default)]
+    pub all_scores: Vec<ClassScore>,
 }
 
 impl Event {
@@ -170,7 +194,17 @@ impl Event {
             class,
             confidence,
             features,
+            all_scores: Vec::new(),
         }
+    }
+
+    /// Attach per-class classification scores (builder style).
+    ///
+    /// Lets callers enrich an event with the classifier's full score vector
+    /// without touching every `Event::new` call site.
+    pub fn with_scores(mut self, scores: Vec<ClassScore>) -> Self {
+        self.all_scores = scores;
+        self
     }
 }
 
