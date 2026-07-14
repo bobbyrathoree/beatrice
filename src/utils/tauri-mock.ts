@@ -329,7 +329,7 @@ const HANDLERS: Record<string, Handler> = {
   // --- Groove engine (match Rust types) ---
   estimate_tempo: (a) => {
     requireKeys(a, ['input']);
-    return { bpm: 120.0, confidence: 0.85, beat_positions_ms: [] };
+    return { bpm: 120.0, confidence: 0.85, beat_positions_ms: [], phase_offset_ms: 0.0 };
   },
 
   quantize_events_command: (a) => {

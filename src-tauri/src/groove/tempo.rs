@@ -17,6 +17,11 @@ pub struct TempoEstimate {
     /// Estimated beat grid positions in milliseconds
     /// These are the predicted locations of beats
     pub beat_positions_ms: Vec<f64>,
+
+    /// Position of the first beat in milliseconds (the grid's phase offset).
+    /// Derived from the head of `beat_positions_ms`; lets consumers align an
+    /// arrangement to where the performer actually started playing.
+    pub phase_offset_ms: f64,
 }
 
 /// Configuration for tempo estimation
@@ -71,6 +76,7 @@ pub fn estimate_tempo_with_config(
             bpm: 120.0, // Default fallback
             confidence: 0.0,
             beat_positions_ms: Vec::new(),
+            phase_offset_ms: 0.0,
         };
     }
 
@@ -82,6 +88,7 @@ pub fn estimate_tempo_with_config(
             bpm: 120.0,
             confidence: 0.0,
             beat_positions_ms: Vec::new(),
+            phase_offset_ms: 0.0,
         };
     }
 
@@ -91,23 +98,47 @@ pub fn estimate_tempo_with_config(
     // Step 3: Find peaks in histogram
     let peaks = find_histogram_peaks(&histogram, config);
 
-    // Step 4: Select best peak
-    let (best_interval_ms, confidence) = select_best_tempo(&peaks, &histogram, config);
+    // Step 4: Select best peak (histogram-derived interval + cosmetic strength)
+    let (histogram_interval_ms, old_confidence) = select_best_tempo(&peaks, &histogram, config);
 
-    // Step 5: Convert interval to BPM
+    // Step 5: Octave-correct the interval. The tallest IOI bin is often a
+    // ½× or 2× octave of the true beat; pick the octave that aligns best.
+    let folded_interval_ms = fold_octave(onsets, histogram_interval_ms, config);
+
+    // Step 5b: Sub-bin refinement. The histogram bins are ~8ms wide, and using
+    // the bin *center* leaves the interval off by up to half a bin. On a long
+    // performance that error accumulates into a whole-beat drift, so we sweep a
+    // fine grid within one bin width of the folded interval and keep the
+    // interval whose grid best lands on the onsets. This is what makes the beat
+    // grid actually FOLLOW the performance (and makes confidence honest).
+    let best_interval_ms = refine_interval(onsets, folded_interval_ms, config);
+
+    // Step 6: Convert interval to BPM
     let bpm = if best_interval_ms > 0.0 {
         60000.0 / best_interval_ms
     } else {
         120.0
     };
 
-    // Step 6: Generate beat grid from estimated tempo
+    // Step 7: Generate beat grid from the folded tempo
     let beat_positions_ms = generate_beat_grid(onsets, bpm, best_interval_ms);
+
+    // Step 8: Honest confidence — blend the (cosmetic) histogram strength with
+    // how well the beat grid actually lands on the onsets. `score_beat_alignment`
+    // sums a per-beat Gaussian proximity; dividing by onset count normalizes a
+    // perfectly periodic performance to ~1.0 and pulls jittered input down.
+    let last_onset = onsets.last().map(|o| o.timestamp_ms).unwrap_or(0.0);
+    let raw_alignment = best_phase_score(onsets, best_interval_ms, last_onset);
+    let normalized_alignment = (raw_alignment / onsets.len() as f64).clamp(0.0, 1.0) as f32;
+    let confidence = (0.25 * old_confidence + 0.75 * normalized_alignment).clamp(0.0, 1.0);
+
+    let phase_offset_ms = beat_positions_ms.first().copied().unwrap_or(0.0);
 
     TempoEstimate {
         bpm: bpm.max(config.min_bpm).min(config.max_bpm),
         confidence,
         beat_positions_ms,
+        phase_offset_ms,
     }
 }
 
@@ -151,14 +182,37 @@ fn build_ioi_histogram(iois: &[f64], config: &TempoConfig) -> Vec<f32> {
     histogram
 }
 
-/// Find peaks in the histogram using local maxima detection
+/// Find peaks in the histogram using local maxima detection.
+///
+/// Edge bins (index 0 and the last bin) are eligible: their off-histogram
+/// neighbour is treated as 0.0 so a tall bin at the very top or bottom of the
+/// BPM range (e.g. ~180 BPM landing in bin 0) is no longer silently skipped.
+/// Uses `>=` so plateaus qualify, and dedupes each run of equal values by
+/// keeping only its first bin.
 fn find_histogram_peaks(histogram: &[f32], _config: &TempoConfig) -> Vec<(usize, f32)> {
     let mut peaks = Vec::new();
 
-    // Find local maxima
-    for i in 1..histogram.len() - 1 {
-        if histogram[i] > histogram[i - 1] && histogram[i] > histogram[i + 1] && histogram[i] > 0.1 {
+    let mut i = 0;
+    while i < histogram.len() {
+        let left = if i == 0 { 0.0 } else { histogram[i - 1] };
+        let right = if i + 1 == histogram.len() {
+            0.0
+        } else {
+            histogram[i + 1]
+        };
+
+        if histogram[i] >= left && histogram[i] >= right && histogram[i] > 0.1 {
             peaks.push((i, histogram[i]));
+            // Dedupe adjacent plateau bins: keep the first of any run of equal
+            // values and skip past the rest of the run.
+            let plateau = histogram[i];
+            let mut j = i + 1;
+            while j < histogram.len() && (histogram[j] - plateau).abs() < f32::EPSILON {
+                j += 1;
+            }
+            i = j;
+        } else {
+            i += 1;
         }
     }
 
@@ -183,7 +237,9 @@ fn select_best_tempo(
     let max_interval_ms = 60000.0 / config.min_bpm;
     let bin_width = (max_interval_ms - min_interval_ms) / config.histogram_bins as f64;
 
-    let interval_ms = min_interval_ms + (best_bin as f64 * bin_width);
+    // Use the bin *center* so the reported interval sits in the middle of the
+    // bin's range rather than at its lower edge.
+    let interval_ms = min_interval_ms + ((best_bin as f64 + 0.5) * bin_width);
 
     // Calculate confidence based on peak strength relative to mean
     let sum: f32 = histogram.iter().sum();
@@ -197,16 +253,18 @@ fn select_best_tempo(
     (interval_ms, confidence)
 }
 
-/// Generate beat grid positions based on estimated tempo
-fn generate_beat_grid(onsets: &[Onset], _bpm: f64, interval_ms: f64) -> Vec<f64> {
+/// Search 8 candidate phases (offsets) for the one whose beat grid best aligns
+/// with the detected onsets. Returns `(best_phase, best_score)` where
+/// `best_score` is the raw `score_beat_alignment` sum for that phase.
+///
+/// Shared by `generate_beat_grid` (uses the phase), `fold_octave` and the
+/// confidence calculation (both use the score).
+fn search_best_phase(onsets: &[Onset], interval_ms: f64, end_time: f64) -> (f64, f64) {
     if onsets.is_empty() || interval_ms <= 0.0 {
-        return Vec::new();
+        return (0.0, 0.0);
     }
 
     let first_onset = onsets[0].timestamp_ms;
-    let last_onset = onsets[onsets.len() - 1].timestamp_ms;
-
-    // Find best phase (offset)
     let num_phase_tests = 8;
     let phase_step = interval_ms / num_phase_tests as f64;
 
@@ -215,13 +273,108 @@ fn generate_beat_grid(onsets: &[Onset], _bpm: f64, interval_ms: f64) -> Vec<f64>
 
     for i in 0..num_phase_tests {
         let phase = first_onset + (i as f64 * phase_step);
-        let score = score_beat_alignment(onsets, phase, interval_ms, last_onset);
+        let score = score_beat_alignment(onsets, phase, interval_ms, end_time);
 
         if score > best_score {
             best_score = score;
             best_phase = phase;
         }
     }
+
+    (best_phase, best_score)
+}
+
+/// Best per-phase alignment score for `interval_ms` (raw sum, not normalized).
+fn best_phase_score(onsets: &[Onset], interval_ms: f64, end_time: f64) -> f64 {
+    search_best_phase(onsets, interval_ms, end_time).1
+}
+
+/// Choose between the histogram's interval and its ½×/2× octaves by scoring
+/// each candidate's per-beat alignment against the onsets.
+///
+/// The histogram's IOI peak is prone to octave errors: fast content (e.g.
+/// eighth notes) makes the sub-beat interval the tallest bin, doubling the BPM.
+/// We score the {½× BPM, 1× BPM, 2× BPM} candidates by *per-beat* alignment
+/// (raw score / beat count) so a shorter interval isn't rewarded merely for
+/// having more beats to hit. A mild 1.05 prior keeps the histogram's own pick
+/// when scores tie. Candidates outside [min_bpm, max_bpm] are skipped.
+fn fold_octave(onsets: &[Onset], interval_ms: f64, config: &TempoConfig) -> f64 {
+    if onsets.is_empty() || interval_ms <= 0.0 {
+        return interval_ms;
+    }
+
+    let last = onsets.last().map(|o| o.timestamp_ms).unwrap_or(0.0);
+    let candidates = [interval_ms * 2.0, interval_ms, interval_ms * 0.5]; // ½×, 1×, 2× BPM
+    let mut best = (interval_ms, f64::MIN);
+
+    for &cand in &candidates {
+        let bpm = 60000.0 / cand;
+        if bpm < config.min_bpm || bpm > config.max_bpm {
+            continue;
+        }
+        // Normalize: per-beat average so long intervals aren't penalized for
+        // having fewer beats to align.
+        let raw = best_phase_score(onsets, cand, last);
+        let beats = (last / cand).max(1.0);
+        let mut score = raw / beats;
+        if (cand - interval_ms).abs() < f64::EPSILON {
+            score *= 1.05; // mild prior for the histogram's own pick
+        }
+        if score > best.1 {
+            best = (cand, score);
+        }
+    }
+
+    best.0
+}
+
+/// Refine a coarse (bin-quantized) interval to the sub-bin value whose beat
+/// grid best aligns with the onsets.
+///
+/// The histogram's bin width is ~8ms; the reported bin center can be off from
+/// the true beat interval by up to half a bin. Left uncorrected, that offset
+/// accumulates into a whole-beat drift over a long performance. We sweep a fine
+/// grid spanning ±1 bin width around the seed and keep the highest-scoring
+/// interval, staying within [min_bpm, max_bpm].
+fn refine_interval(onsets: &[Onset], seed_interval_ms: f64, config: &TempoConfig) -> f64 {
+    if onsets.is_empty() || seed_interval_ms <= 0.0 {
+        return seed_interval_ms;
+    }
+
+    let min_interval_ms = 60000.0 / config.max_bpm;
+    let max_interval_ms = 60000.0 / config.min_bpm;
+    let bin_width = (max_interval_ms - min_interval_ms) / config.histogram_bins as f64;
+    let last = onsets.last().map(|o| o.timestamp_ms).unwrap_or(0.0);
+
+    let lo = (seed_interval_ms - bin_width).max(min_interval_ms);
+    let hi = (seed_interval_ms + bin_width).min(max_interval_ms);
+    if hi <= lo {
+        return seed_interval_ms;
+    }
+
+    let steps = 64;
+    let mut best = (seed_interval_ms, best_phase_score(onsets, seed_interval_ms, last));
+    for i in 0..=steps {
+        let iv = lo + (hi - lo) * (i as f64 / steps as f64);
+        let s = best_phase_score(onsets, iv, last);
+        if s > best.1 {
+            best = (iv, s);
+        }
+    }
+
+    best.0
+}
+
+/// Generate beat grid positions based on estimated tempo
+fn generate_beat_grid(onsets: &[Onset], _bpm: f64, interval_ms: f64) -> Vec<f64> {
+    if onsets.is_empty() || interval_ms <= 0.0 {
+        return Vec::new();
+    }
+
+    let last_onset = onsets[onsets.len() - 1].timestamp_ms;
+
+    // Find best phase (offset)
+    let (best_phase, _best_score) = search_best_phase(onsets, interval_ms, last_onset);
 
     let mut beat_positions = Vec::new();
     let mut beat_time = best_phase;
@@ -271,6 +424,31 @@ fn score_beat_alignment(onsets: &[Onset], phase: f64, interval_ms: f64, end_time
 mod tests {
     use super::*;
 
+    /// Build `n` onsets evenly spaced `step` ms apart, starting at t=0.
+    fn onsets_every_ms(step: f64, n: usize) -> Vec<Onset> {
+        (0..n)
+            .map(|i| Onset {
+                timestamp_ms: i as f64 * step,
+                strength: 1.0,
+            })
+            .collect()
+    }
+
+    /// Build `n` onsets nominally `step` ms apart, but with a deterministic
+    /// zigzag jitter of `±j` ms (even indices +j, odd indices -j).
+    fn onsets_every_ms_jittered(step: f64, n: usize, j: f64) -> Vec<Onset> {
+        (0..n)
+            .map(|i| {
+                let base = i as f64 * step;
+                let offset = if i % 2 == 0 { j } else { -j };
+                Onset {
+                    timestamp_ms: base + offset,
+                    strength: 1.0,
+                }
+            })
+            .collect()
+    }
+
     #[test]
     fn test_tempo_estimation_regular_beats() {
         let mut onsets = Vec::new();
@@ -286,5 +464,63 @@ mod tests {
         let estimate = estimate_tempo(&onsets, 44100);
         assert!(estimate.bpm > 108.0 && estimate.bpm < 112.0);
         assert!(estimate.confidence > 0.2);
+    }
+
+    #[test]
+    fn eighth_note_content_folds_to_base_tempo() {
+        // CAREFUL FIXTURE CHOICE: onsets every 250ms would NOT reproduce the bug — compute_iois
+        // excludes intervals <= 250.0 (tempo.rs:121) and the all-to-all pairs put the strongest
+        // peak at 500ms anyway. Use eighths at 110 BPM (273ms): 273 IS in the IOI window, becomes
+        // the tallest histogram bin → naive BPM 219.8 → clamped to max_bpm=180 (tempo.rs:41,108).
+        // After octave folding, the 546ms candidate (109.9 BPM) must win on per-beat alignment.
+        let onsets = onsets_every_ms(273.0, 16);
+        let est = estimate_tempo(&onsets, 44100);
+        assert!(
+            (est.bpm - 110.0).abs() < 5.0,
+            "got {} (was 180.0 = clamped double-tempo before fix)",
+            est.bpm
+        );
+    }
+
+    #[test]
+    fn sparse_content_keeps_base_over_double_tempo_candidate() {
+        // Onsets every 750ms → histogram picks 750ms (80 BPM). Candidates: 1500ms (40 BPM — below
+        // min_bpm 60, skipped), 750ms (80), 375ms (160 BPM — all onsets still align but per-beat
+        // normalization halves its score). 80 must survive folding.
+        let onsets = onsets_every_ms(750.0, 8);
+        let est = estimate_tempo(&onsets, 44100);
+        assert!((est.bpm - 80.0).abs() < 4.0, "got {}", est.bpm);
+    }
+
+    #[test]
+    fn confidence_is_not_cosmetic() {
+        // Perfectly periodic → high; jittered ±80ms → strictly lower.
+        let periodic = estimate_tempo(&onsets_every_ms(500.0, 12), 44100);
+        let jittered = estimate_tempo(&onsets_every_ms_jittered(500.0, 12, 80.0), 44100); // deterministic zigzag ±80ms
+        assert!(periodic.confidence > 0.8);
+        assert!(jittered.confidence < periodic.confidence - 0.15);
+    }
+
+    #[test]
+    fn edge_bins_are_eligible_peaks() {
+        // All IOIs at ~333ms (≈180 BPM) land in bin 0 today and are skipped by `for i in 1..len-1`.
+        let onsets = onsets_every_ms(334.0, 12);
+        let est = estimate_tempo(&onsets, 44100);
+        assert!(est.confidence > 0.0, "edge bin was skipped: confidence 0");
+    }
+
+    #[test]
+    fn phase_offset_exposed_and_matches_first_beat() {
+        let mut onsets = onsets_every_ms(500.0, 8);
+        for o in &mut onsets {
+            o.timestamp_ms += 320.0;
+        } // leading silence
+        let est = estimate_tempo(&onsets, 44100);
+        assert!(
+            (est.phase_offset_ms.rem_euclid(60000.0 / est.bpm)
+                - 320.0_f64.rem_euclid(60000.0 / est.bpm))
+            .abs()
+                < 40.0
+        );
     }
 }

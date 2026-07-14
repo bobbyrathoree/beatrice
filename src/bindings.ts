@@ -625,7 +625,13 @@ confidence: number;
  * Estimated beat grid positions in milliseconds
  * These are the predicted locations of beats
  */
-beat_positions_ms: number[] }
+beat_positions_ms: number[]; 
+/**
+ * Position of the first beat in milliseconds (the grid's phase offset).
+ * Derived from the head of `beat_positions_ms`; lets consumers align an
+ * arrangement to where the performer actually started playing.
+ */
+phase_offset_ms: number }
 /**
  * Complete theme definition
  */

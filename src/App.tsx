@@ -574,7 +574,7 @@ function App() {
             events,
             quantized_events: quantized,
             arrangement,
-            tempo: { bpm: run.bpm, confidence: 0, beat_positions_ms: [] },
+            tempo: { bpm: run.bpm, confidence: 0, beat_positions_ms: [], phase_offset_ms: 0 },
             duration_ms: fullProject.duration_ms,
           });
 
