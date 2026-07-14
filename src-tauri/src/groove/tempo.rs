@@ -317,6 +317,46 @@ fn onset_coverage(onsets: &[Onset], interval_ms: f64) -> f64 {
     covered as f64 / onsets.len() as f64
 }
 
+/// Fraction of a candidate grid's beats that have an onset within tolerance —
+/// the *precision* mirror of `onset_coverage`'s *recall*.
+///
+/// Where `onset_coverage` asks "how many ONSETS does this grid explain?" (and so
+/// penalises a too-SLOW grid that abandons onsets in its gaps), `beat_occupancy`
+/// asks "how many of this grid's BEATS are actually used?" (and so penalises a
+/// too-FAST grid that inserts beats landing on nothing). A 2× grid gets coverage
+/// 1.0 for free — it is a superset of the 1× grid — but it can only keep
+/// occupancy 1.0 if the content is *genuinely* at the faster tempo (every
+/// inserted beat lands on a real onset). Over-subdivision shows up here as
+/// occupancy < 1.0. Uses the same `interval * 0.15` tolerance as the other
+/// scorers for consistency.
+fn beat_occupancy(onsets: &[Onset], interval_ms: f64) -> f64 {
+    if onsets.is_empty() || interval_ms <= 0.0 {
+        return 0.0;
+    }
+    let last = onsets.last().map(|o| o.timestamp_ms).unwrap_or(0.0);
+    let (phase, _) = search_best_phase(onsets, interval_ms, last);
+    let tolerance_ms = interval_ms * 0.15;
+    let mut beats = 0usize;
+    let mut occupied = 0usize;
+    let mut bt = phase;
+    while bt <= last {
+        beats += 1;
+        let nearest = onsets
+            .iter()
+            .map(|o| (o.timestamp_ms - bt).abs())
+            .fold(f64::MAX, f64::min);
+        if nearest <= tolerance_ms {
+            occupied += 1;
+        }
+        bt += interval_ms;
+    }
+    if beats == 0 {
+        0.0
+    } else {
+        occupied as f64 / beats as f64
+    }
+}
+
 /// Choose between the histogram's interval and its ½×/2× octaves by scoring
 /// each candidate's per-beat alignment against the onsets.
 ///
@@ -339,28 +379,68 @@ fn onset_coverage(onsets: &[Onset], interval_ms: f64) -> f64 {
 /// test-8bar-progression.wav: 60 BPM pick has coverage 0.28, the correct 120 BPM
 /// double has coverage 0.55, yet 60 wins on per-beat average).
 ///
-/// Fix: multiply each candidate's per-beat alignment by its onset COVERAGE — the
-/// fraction of onsets that land within tolerance of *some* beat of that grid
-/// (see `onset_coverage`). Coverage counts onsets-explained, not beats-hit, so a
-/// grid that abandons onsets in the gaps (coverage 0.5) can no longer out-score
-/// one that explains them all (coverage 1.0) merely by having fewer beats. This
-/// directly encodes the invariant: a candidate that explains FEWER of the onsets
-/// must not out-score one that explains all of them.
+/// Fix (round 1): multiply each candidate's per-beat alignment by its onset
+/// COVERAGE — the fraction of onsets that land within tolerance of *some* beat of
+/// that grid (see `onset_coverage`). Coverage counts onsets-explained, not
+/// beats-hit, so a grid that abandons onsets in the gaps (coverage 0.5) can no
+/// longer out-score one that explains them all (coverage 1.0) merely by having
+/// fewer beats. This directly encodes the invariant: a candidate that explains
+/// FEWER of the onsets must not out-score one that explains all of them.
 ///
-/// Why multiply (not an eligibility gate) and why it passes BOTH folding tests:
-/// - `eighth_note_content_folds_to_base_tempo` (273ms eighths, true 110 BPM): the
-///   histogram's in-range pick is the 546ms quarter (110 BPM); its ½× (1091ms,
-///   55 BPM) and 2× (273ms, 220 BPM) octaves both fall OUTSIDE [min_bpm, max_bpm]
-///   and are skipped, so only the correct 1× competes — coverage weighting is a
-///   no-op here and 110 BPM stands. (The brief's worry that offbeat eighths give
-///   the 1× grid coverage ~0.5 is moot: with no in-range rival, scaling the sole
-///   candidate can't change the winner.)
-/// - `sparse_quarter_notes_do_not_fold_to_half_time` (test-pattern onsets): the
-///   ½× 60 BPM grid (coverage 0.5) is multiplied down below the 121 BPM grid
-///   (coverage 1.0), so it no longer wins. An eligibility gate keyed to the 1×
-///   pick would fix THIS case but NOT the 8bar case above (there the low-coverage
-///   candidate IS the 1× baseline); multiplying every candidate by its own
-///   coverage handles both symmetrically.
+/// # Beat-occupancy balancing (double-time fix — round 2)
+/// Coverage is a one-sided guard: it measures RECALL over onsets, so it correctly
+/// punishes a too-SLOW grid (which leaves onsets uncovered). But it can never
+/// punish a too-FAST grid, because a 2× grid is a *superset* of the 1× grid —
+/// every onset the 1× explains is trivially explained by the 2× as well, giving
+/// it coverage 1.0 for free. So on quarter-dominant content with a few offbeat
+/// eighth *fills*, the 1× quarter grid leaves the fills uncovered (coverage < 1.0)
+/// while the 2× eighth grid covers everything (coverage 1.0), and coverage-weighted
+/// scoring UNFOLDS the correct tempo to double-time (see the reviewer's algebra
+/// and `offbeat_fills_do_not_unfold_to_double_time`: 5 quarters @ 80 BPM + 3
+/// offbeat eighths folded to 160 BPM before this fix).
+///
+/// The symmetric guard is `beat_occupancy` — the PRECISION mirror: the fraction of
+/// the candidate grid's own BEATS that are actually used by an onset. A genuine
+/// 2× tempo keeps occupancy 1.0 (every inserted beat lands on a real onset); a
+/// spurious 2× over-subdivision drops it (the inserted between-beats land on
+/// nothing). We combine the two into their HARMONIC MEAN
+/// `balance = 2·cov·occ / (cov + occ)` (the F1 of recall and precision) and weight
+/// per-beat alignment by that instead of coverage alone. A candidate now has to be
+/// good on BOTH axes: explain the onsets (coverage) AND not waste beats (occupancy).
+///
+/// Why the harmonic mean and not the product `cov·occ`: on the offbeat fixture the
+/// slower-correct 79 BPM grid has (cov 0.625, occ 1.0) and the faster-wrong 158 BPM
+/// grid has (cov 1.0, occ 0.875). The product ranks them 0.625 vs 0.875 → still
+/// picks the fast (wrong) one; the harmonic mean ranks them 0.77 vs 0.93 on the
+/// balance term, but once multiplied by per-beat alignment (0.90 vs 0.69, since the
+/// quarter grid fits its onsets far better per beat) the slower grid wins
+/// 0.685 > 0.637. The harmonic mean's gentler penalty on the high-recall/low-
+/// precision axis is what lets the far-superior per-beat alignment of the true
+/// tempo carry the decision. The product over-penalises and mis-ranks.
+///
+/// Why this keeps BOTH folding tests green (verified empirically, not assumed):
+/// - `eighth_note_content_folds_to_base_tempo` (273ms eighths, true 110 BPM): only
+///   the 546ms 1× quarter is in [min_bpm, max_bpm]; its ½×/2× octaves are skipped,
+///   so with a sole candidate the balance term can't change the winner — 110 stands.
+/// - `sparse_quarter_notes_do_not_fold_to_half_time` (test-pattern onsets): the ½×
+///   60 BPM grid has cov 0.5 → balance 0.667, so per-beat×balance = 0.630, below the
+///   121 BPM grid's cov 1.0 balance 1.0 → 0.887 (×1.05 prior). 121 still wins; the
+///   half-time fix is preserved.
+/// - `sparse_content_keeps_base_over_double_tempo_candidate` (750ms quarters): the
+///   2× 159 BPM grid has occ 0.5 (only every other beat used) → balance 0.667, so it
+///   loses to the 80 BPM 1× (balance 1.0). 80 stands.
+/// - real audio `test-8bar-progression.wav` (busy content, true 120 BPM): here the
+///   faster 120 BPM candidate is CORRECT and both its coverage AND occupancy are
+///   high, so the occupancy guard does NOT block it — 120 wins over the 60 BPM
+///   half-time, exactly as before. The guard only blocks a faster candidate whose
+///   *extra* beats are unoccupied, never one that genuinely fits.
+///
+/// This is the reviewer's requested symmetry, generalised: rather than a one-off
+/// "a faster-than-1× candidate must also beat the 1× per-beat" rule (which would
+/// not even fire on the offbeat fixture, where the histogram's OWN 1× pick is the
+/// too-fast eighth and the correct quarter is the ½× candidate), the coverage⊗
+/// occupancy balance makes the fit symmetric for EVERY candidate: too-slow is
+/// caught by coverage, too-fast by occupancy.
 ///
 /// # Deferred (spec §4.2)
 /// The spec also asks to "prefer the candidate in the theme's stated BPM range
@@ -389,7 +469,17 @@ fn fold_octave(onsets: &[Onset], interval_ms: f64, config: &TempoConfig) -> f64 
         let raw = best_phase_score(onsets, cand, last);
         let beats = (last / cand).max(1.0);
         let coverage = onset_coverage(onsets, cand);
-        let mut score = (raw / beats) * coverage;
+        let occupancy = beat_occupancy(onsets, cand);
+        // Balance recall (coverage) and precision (occupancy) with their harmonic
+        // mean, so a candidate must both EXPLAIN the onsets AND not waste beats.
+        // See the doc comment for why the harmonic mean (not the product) is the
+        // formulation that keeps BOTH the half-time and double-time guards.
+        let balance = if coverage + occupancy > 0.0 {
+            2.0 * coverage * occupancy / (coverage + occupancy)
+        } else {
+            0.0
+        };
+        let mut score = (raw / beats) * balance;
         if (cand - interval_ms).abs() < f64::EPSILON {
             score *= 1.05; // mild prior for the histogram's own pick
         }
@@ -596,6 +686,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn offbeat_fills_do_not_unfold_to_double_time() {
+        // REGRESSION RISK (review of commit 7974870): `fold_octave` now scores
+        // candidates by `(raw/beats) * coverage`. Coverage strictly favours the
+        // FASTER octave: a 2× grid is a superset of the 1× grid, so every onset
+        // the 1× explains is also explained by the 2× (coverage 1.0), while the
+        // 1× grid leaves the offbeat eighth fills uncovered (coverage < 1.0).
+        // For quarter-dominant content at ≤90 BPM with a few offbeat eighth
+        // fills, the coverage multiplier can therefore UNFOLD the correct quarter
+        // tempo up to double-time. Reviewer's algebra: with Q quarters and F
+        // offbeat fills, the 2× candidate wins once F > ~0.45·Q.
+        //
+        // Fixture: 5 quarters @ 80 BPM (750ms: 0/750/1500/2250/3000) + 3 offbeat
+        // eighths (375/1125/1875). The correct answer is ~80 BPM; a return of
+        // ~160 BPM is the double-time unfold this guard must prevent.
+        let onsets: Vec<Onset> = [0.0, 375.0, 750.0, 1125.0, 1500.0, 1875.0, 2250.0, 3000.0]
+            .iter()
+            .map(|&t| Onset {
+                timestamp_ms: t,
+                strength: 1.0,
+            })
+            .collect();
+        let est = estimate_tempo(&onsets, 44100);
+        assert!(
+            (est.bpm - 80.0).abs() < 6.0,
+            "got {} (≈160 = double-time unfold from coverage favouring the faster octave)",
+            est.bpm
+        );
+    }
 
     #[test]
     fn confidence_is_not_cosmetic() {
