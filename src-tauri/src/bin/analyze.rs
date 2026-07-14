@@ -56,7 +56,7 @@ fn main() {
     let tempo = groove::estimate_tempo(&onsets, audio.sample_rate);
     println!("\n=== TEMPO: {:.1} BPM (conf={:.0}%) ===", tempo.bpm, tempo.confidence*100.0);
 
-    let grid = Grid::new_with_feel(tempo.bpm, TimeSignature::FourFour, GridDivision::Sixteenth, GrooveFeel::Straight, 0.0, 4);
+    let grid = Grid::with_phase(tempo.bpm, TimeSignature::FourFour, GridDivision::Sixteenth, GrooveFeel::Straight, 0.0, 4, tempo.phase_offset_ms);
     let settings = QuantizeSettings { strength: 0.8, swing_amount: 0.0, lookahead_ms: 100.0 };
     let quantized = groove::quantize_events(&events, &grid, &settings);
 

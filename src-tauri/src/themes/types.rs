@@ -124,8 +124,11 @@ impl Theme {
         let ms_per_beat = 60_000.0 / grid.bpm;
         let ms_per_bar = ms_per_beat * grid.time_signature.beats_per_bar() as f64;
 
-        // Current bar (0-indexed)
-        let bar = (timestamp_ms / ms_per_bar).floor() as u32;
+        // Current bar (0-indexed). Anchor to the grid's phase offset so chords flip
+        // on the performer's bar boundaries, not on raw t=0 boundaries — otherwise
+        // an anacrusis shifts every chord change earlier by the offset.
+        let anchored_ms = (timestamp_ms - grid.phase_offset_ms).max(0.0);
+        let bar = (anchored_ms / ms_per_bar).floor() as u32;
 
         // Total bars in one progression cycle
         let progression_cycle_bars = self.chord_progression.bars_per_chord * chords.len() as u32;
@@ -254,6 +257,33 @@ pub fn bass_notes(chord_root: u8, pattern: &BassPattern) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::groove::grid::{Grid, GridDivision, GrooveFeel, TimeSignature};
+
+    #[test]
+    fn chord_boundaries_respect_grid_phase() {
+        // 120 BPM, 2 bars/chord, phase 320ms: bar 2 starts at 320 + 2*2000 = 4320ms.
+        // Raw-timestamp math (today) flips the chord at 4000ms — 320ms early.
+        let theme = crate::themes::get_theme("BLADE RUNNER").unwrap();
+        let grid = Grid::with_phase(
+            120.0,
+            TimeSignature::FourFour,
+            GridDivision::Sixteenth,
+            GrooveFeel::Straight,
+            0.0,
+            8,
+            320.0,
+        );
+        // still chord 1
+        assert_eq!(
+            theme.get_chord_at_time(4100.0, &grid),
+            theme.get_chord_at_time(500.0, &grid)
+        );
+        // chord 2 after 4320
+        assert_ne!(
+            theme.get_chord_at_time(4400.0, &grid),
+            theme.get_chord_at_time(500.0, &grid)
+        );
+    }
 
     #[test]
     fn test_natural_minor_scale() {

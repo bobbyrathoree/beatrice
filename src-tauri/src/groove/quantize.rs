@@ -245,7 +245,7 @@ pub fn humanize_timing(
 mod tests {
     use super::*;
     use crate::events::{EventClass, EventFeatures};
-    use crate::groove::grid::{TimeSignature, GridDivision};
+    use crate::groove::grid::{TimeSignature, GridDivision, GrooveFeel};
 
     fn create_test_event(timestamp_ms: f64) -> Event {
         Event::new(
@@ -348,6 +348,35 @@ mod tests {
 
         // On-beats should remain unchanged
         assert!((quantized[0].quantized_timestamp_ms - 0.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn anacrusis_lands_on_downbeat_with_anchored_grid() {
+        // events at 320, 820, 1320 (120 BPM beats offset by 320ms)
+        let events = vec![
+            create_test_event(320.0),
+            create_test_event(820.0),
+            create_test_event(1320.0),
+        ];
+        let grid = Grid::with_phase(
+            120.0,
+            TimeSignature::FourFour,
+            GridDivision::Sixteenth,
+            GrooveFeel::Straight,
+            0.0,
+            4,
+            320.0,
+        );
+        let q = quantize_events(
+            &events,
+            &grid,
+            &QuantizeSettings { strength: 1.0, swing_amount: 0.0, lookahead_ms: 100.0 },
+        );
+        assert_eq!(
+            (q[0].grid_position.bar, q[0].grid_position.beat, q[0].grid_position.subdivision),
+            (0, 0, 0)
+        );
+        assert!((q[0].snap_delta_ms).abs() < 1e-6); // was ~-70ms against a t=0 grid
     }
 
     #[test]

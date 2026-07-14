@@ -107,6 +107,13 @@ pub struct Grid {
     /// Total number of bars in the grid
     pub bar_count: u32,
 
+    /// Phase offset in milliseconds — where the anchored downbeat (bar 0, beat 0,
+    /// subdivision 0) actually sits in time. Derived from the performer's first
+    /// beat so leading silence / an anacrusis doesn't misalign every downbeat.
+    /// Every grid slot is `phase_offset_ms + <un-anchored position>`.
+    #[serde(default)]
+    pub phase_offset_ms: f64,
+
     /// All grid positions in milliseconds (pre-calculated)
     pub beat_positions_ms: Vec<f64>,
 }
@@ -126,6 +133,7 @@ impl Grid {
             feel: GrooveFeel::Straight,
             swing_amount: 0.0,
             bar_count,
+            phase_offset_ms: 0.0,
             beat_positions_ms: Vec::new(),
         };
 
@@ -149,6 +157,52 @@ impl Grid {
             feel,
             swing_amount: swing_amount.clamp(0.0, 1.0),
             bar_count,
+            phase_offset_ms: 0.0,
+            beat_positions_ms: Vec::new(),
+        };
+
+        grid.calculate_beat_positions();
+        grid
+    }
+
+    /// Create a grid anchored to a phase offset.
+    ///
+    /// The offset shifts every grid slot forward so the downbeat lands where the
+    /// performer actually started (see `phase_offset_ms`). A full-bars offset just
+    /// relabels bar numbers, so we normalize the stored phase into a single bar
+    /// via `% bar_ms` — the remaining sub-bar phase is what actually re-aligns the
+    /// grid. `bpm <= 0` (degenerate) keeps the raw offset since bar length is
+    /// undefined.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_phase(
+        bpm: f64,
+        time_signature: TimeSignature,
+        division: GridDivision,
+        feel: GrooveFeel,
+        swing_amount: f32,
+        bar_count: u32,
+        phase_offset_ms: f64,
+    ) -> Self {
+        let normalized_phase = if bpm > 0.0 {
+            let ms_per_beat = 60000.0 / bpm;
+            let bar_ms = ms_per_beat * time_signature.beats_per_bar() as f64;
+            if bar_ms > 0.0 {
+                phase_offset_ms.rem_euclid(bar_ms)
+            } else {
+                phase_offset_ms
+            }
+        } else {
+            phase_offset_ms
+        };
+
+        let mut grid = Grid {
+            bpm,
+            time_signature,
+            division,
+            feel,
+            swing_amount: swing_amount.clamp(0.0, 1.0),
+            bar_count,
+            phase_offset_ms: normalized_phase,
             beat_positions_ms: Vec::new(),
         };
 
@@ -209,7 +263,12 @@ impl Grid {
         let subdivisions_per_beat = self.division.subdivisions_per_beat() as f64;
         let subdivision_duration = ms_per_beat / subdivisions_per_beat;
 
-        let estimated_idx = (timestamp_ms / subdivision_duration).round() as i64;
+        // Invert the phase anchor: grid slots live at `phase_offset_ms + k*dur`, so
+        // estimate the index from the phase-relative time. Events before the first
+        // anchored slot (t < phase_offset) clamp to index 0 — pickup notes snap
+        // forward onto the downbeat rather than off the front of the grid.
+        let relative_ms = timestamp_ms - self.phase_offset_ms;
+        let estimated_idx = (relative_ms / subdivision_duration).round() as i64;
         let estimated_idx = estimated_idx.max(0) as usize;
 
         let mut nearest_idx = estimated_idx;
@@ -298,15 +357,20 @@ impl Grid {
             let swing_delay = (subdivision_duration * self.swing_amount as f64 * 0.33).min(subdivision_duration * 0.5);
             pos += swing_delay;
         }
-        pos
+        // Anchor to the performer's downbeat: every slot sits `phase_offset_ms`
+        // later than its un-anchored position.
+        self.phase_offset_ms + pos
     }
 
-    /// Get total duration of the grid in milliseconds
+    /// Get total duration of the grid in milliseconds.
+    ///
+    /// Includes the phase offset so the last shifted slot still fits — otherwise a
+    /// phase-anchored arrangement's tail gets truncated on export/render.
     pub fn total_duration_ms(&self) -> f64 {
         if self.bpm <= 0.0 { return 0.0; }
         let ms_per_beat = 60000.0 / self.bpm;
         let beats_per_bar = self.time_signature.beats_per_bar();
-        ms_per_beat * beats_per_bar as f64 * self.bar_count as f64
+        self.phase_offset_ms + ms_per_beat * beats_per_bar as f64 * self.bar_count as f64
     }
 }
 
@@ -329,8 +393,42 @@ mod tests {
         let (pos, idx) = grid.get_nearest_beat(15000.0);
         assert!((pos - 15000.0).abs() < 1.0);
         assert_eq!(idx, 120); // 15s / 125ms = 120
-        
+
         let gp = grid.get_grid_position(15000.0);
         assert_eq!(gp.bar, 7); // 8th bar (0-indexed)
+    }
+
+    #[test]
+    fn phase_offset_shifts_all_positions() {
+        let g0 = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Sixteenth, 4);
+        let g = Grid::with_phase(
+            120.0,
+            TimeSignature::FourFour,
+            GridDivision::Sixteenth,
+            GrooveFeel::Straight,
+            0.0,
+            4,
+            320.0,
+        );
+        for (a, b) in g0.beat_positions_ms.iter().zip(&g.beat_positions_ms) {
+            assert!((b - a - 320.0).abs() < 1e-9);
+        }
+        let (nearest, _) = g.get_nearest_beat(320.0);
+        assert!((nearest - 320.0).abs() < 1e-9); // downbeat is AT the phase, not at t=0
+    }
+
+    #[test]
+    fn total_duration_includes_phase_offset() {
+        let g = Grid::with_phase(
+            120.0,
+            TimeSignature::FourFour,
+            GridDivision::Sixteenth,
+            GrooveFeel::Straight,
+            0.0,
+            4,
+            320.0,
+        );
+        let g0 = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Sixteenth, 4);
+        assert!((g.total_duration_ms() - (g0.total_duration_ms() + 320.0)).abs() < 1e-9);
     }
 }

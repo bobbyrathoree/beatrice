@@ -634,6 +634,10 @@ pub struct QuantizeEventsInput {
     pub bar_count: u32,
     pub quantize_strength: f32,
     pub lookahead_ms: f64,
+    /// Grid phase offset (ms) from tempo estimation. Anchors the quantization grid
+    /// to the performer's downbeat. Defaults to 0.0 (t=0 anchor) for back-compat.
+    #[serde(default)]
+    pub phase_offset_ms: Option<f64>,
 }
 
 /// Quantize events to a musical grid
@@ -664,14 +668,16 @@ pub fn quantize_events_command(input: QuantizeEventsInput) -> CommandResult<Vec<
         _ => GrooveFeel::Straight,
     };
 
-    // Create grid
-    let grid = Grid::new_with_feel(
+    // Create grid, anchored to the estimated beat phase so a leading silence /
+    // anacrusis doesn't misquantize every downbeat.
+    let grid = Grid::with_phase(
         input.bpm,
         time_signature,
         division,
         feel,
         input.swing_amount,
         input.bar_count,
+        input.phase_offset_ms.unwrap_or(0.0),
     );
 
     // Create quantize settings
@@ -718,6 +724,11 @@ pub struct ArrangeEventsInput {
     pub swing_amount: f32,
     pub bar_count: u32,
     pub b_emphasis: f32,
+    /// Grid phase offset (ms) from tempo estimation. Anchors the arrangement grid
+    /// (chord boundaries, beat placement) to the performer's downbeat. Defaults to
+    /// 0.0 for back-compat.
+    #[serde(default)]
+    pub phase_offset_ms: Option<f64>,
 }
 
 /// Arrange quantized events into a musical arrangement
@@ -760,14 +771,16 @@ pub fn arrange_events_command(input: ArrangeEventsInput) -> CommandResult<Arrang
         _ => GrooveFeel::Straight,
     };
 
-    // Create grid
-    let grid = Grid::new_with_feel(
+    // Create grid, anchored to the estimated beat phase so chord boundaries and
+    // beat placement line up with the performer's downbeat.
+    let grid = Grid::with_phase(
         input.bpm,
         time_signature,
         division,
         feel,
         input.swing_amount,
         input.bar_count,
+        input.phase_offset_ms.unwrap_or(0.0),
     );
 
     // Arrange events with harmonic context
@@ -798,6 +811,10 @@ pub struct ExportMidiInput {
     pub include_tempo: Option<bool>,
     pub include_time_signature: Option<bool>,
     pub track_names: Option<bool>,
+    /// Grid phase offset (ms) from tempo estimation. Extends grid duration so a
+    /// phase-shifted arrangement's tail isn't truncated on export. Defaults to 0.0.
+    #[serde(default)]
+    pub phase_offset_ms: Option<f64>,
 }
 
 /// Export arrangement as MIDI file bytes
@@ -828,14 +845,16 @@ pub fn export_midi_command(input: ExportMidiInput) -> CommandResult<Vec<u8>> {
         _ => GrooveFeel::Straight,
     };
 
-    // Create grid
-    let grid = Grid::new_with_feel(
+    // Create grid, anchored to the estimated beat phase so the exported grid
+    // duration covers the phase-shifted tail.
+    let grid = Grid::with_phase(
         input.bpm,
         time_signature,
         division,
         feel,
         input.swing_amount,
         input.bar_count,
+        input.phase_offset_ms.unwrap_or(0.0),
     );
 
     // Create MIDI export options

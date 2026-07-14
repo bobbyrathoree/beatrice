@@ -18,6 +18,8 @@ interface ExportControlsProps {
     bar_count: number;
   };
   themeName: string;
+  /** Grid phase offset (ms) from tempo estimation; anchors the exported grid. */
+  phaseOffsetMs?: number;
   disabled?: boolean;
 }
 
@@ -36,6 +38,7 @@ export function ExportControls({
   arrangement,
   gridSettings,
   themeName,
+  phaseOffsetMs = 0,
   disabled = false,
 }: ExportControlsProps) {
   const [midiStatus, setMidiStatus] = useState<ExportStatus>('idle');
@@ -61,6 +64,7 @@ export function ExportControls({
           include_tempo: true,
           include_time_signature: true,
           track_names: true,
+          phase_offset_ms: phaseOffsetMs,
         })
       );
 

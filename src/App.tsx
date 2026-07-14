@@ -250,6 +250,7 @@ function App() {
           bar_count: gridSettings.bar_count,
           quantize_strength: quantizeSettings.strength,
           lookahead_ms: quantizeSettings.lookahead_ms,
+          phase_offset_ms: tempoResult.phase_offset_ms,
         })
         .then(unwrap)
         .catch((err) => {
@@ -270,6 +271,7 @@ function App() {
           swing_amount: gridSettings.swing_amount,
           bar_count: gridSettings.bar_count,
           b_emphasis: pipelineParams.bEmphasis,
+          phase_offset_ms: tempoResult.phase_offset_ms,
         })
         .then(unwrap)
         .catch((err) => {
@@ -365,6 +367,7 @@ function App() {
           bar_count: gridSettings.bar_count,
           quantize_strength: quantizeSettings.strength,
           lookahead_ms: quantizeSettings.lookahead_ms,
+          phase_offset_ms: pipelineResult.tempo?.phase_offset_ms ?? 0,
         })
       );
 
@@ -381,6 +384,7 @@ function App() {
           swing_amount: gridSettings.swing_amount,
           bar_count: gridSettings.bar_count,
           b_emphasis: pipelineParams.bEmphasis,
+          phase_offset_ms: pipelineResult.tempo?.phase_offset_ms ?? 0,
         })
       );
       setPipelineResult((prev) => {
@@ -552,6 +556,8 @@ function App() {
               bar_count: gridSettings.bar_count,
               quantize_strength: run.quantize_strength,
               lookahead_ms: quantizeSettings.lookahead_ms,
+              // Phase offset isn't persisted per-run; replay anchors at t=0.
+              phase_offset_ms: 0,
             })
           );
 
@@ -567,6 +573,7 @@ function App() {
               swing_amount: run.swing,
               bar_count: gridSettings.bar_count,
               b_emphasis: run.b_emphasis,
+              phase_offset_ms: 0,
             })
           );
 
@@ -958,6 +965,7 @@ function App() {
                     arrangement={pipelineResult.arrangement}
                     gridSettings={gridSettings}
                     themeName={selectedTheme?.name || pipelineParams.theme}
+                    phaseOffsetMs={pipelineResult.tempo?.phase_offset_ms ?? 0}
                     disabled={false}
                   />
                 </motion.div>

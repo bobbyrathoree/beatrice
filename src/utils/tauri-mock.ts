@@ -84,6 +84,7 @@ function buildMockArrangement(args: Record<string, any>): unknown {
   const quantizedEvents = args?.input?.events || [];
   const bpm = args?.input?.bpm || 120;
   const barCount = args?.input?.bar_count || 4;
+  const phaseOffsetMs = args?.input?.phase_offset_ms ?? 0;
   const totalDurationMs = (barCount * 4 * 60000) / bpm;
   const template = args?.input?.template || 'synthwave_straight';
 
@@ -120,8 +121,9 @@ function buildMockArrangement(args: Record<string, any>): unknown {
       source_event_id: event.id || null,
     };
 
-    // Determine active chord (2 bars per chord)
-    const bar = Math.floor(timestamp / msPerBar);
+    // Determine active chord (2 bars per chord), anchored to the grid phase so
+    // chord boundaries respect the performer's downbeat (mirrors get_chord_at_time).
+    const bar = Math.floor(Math.max(0, timestamp - phaseOffsetMs) / msPerBar);
     const chordIndex = Math.floor((bar % 8) / 2);
     const currentChord = chords[chordIndex];
 
@@ -339,9 +341,13 @@ const HANDLERS: Record<string, Handler> = {
     const bpm = a.input?.bpm || 120;
     const beatMs = 60000 / bpm;
     const divisionMs = beatMs / 4; // sixteenth note
+    // Anchor the grid to the estimated beat phase (Grid::with_phase). Mirrors the
+    // Rust caller sweep so mock quantization lines up with the real backend.
+    const phaseOffsetMs = a.input?.phase_offset_ms ?? 0;
 
     return inputEvents.map((event: any) => {
-      const nearestGrid = Math.round(event.timestamp_ms / divisionMs) * divisionMs;
+      const relative = event.timestamp_ms - phaseOffsetMs;
+      const nearestGrid = phaseOffsetMs + Math.max(0, Math.round(relative / divisionMs)) * divisionMs;
       return {
         original_event: event,
         original_timestamp_ms: event.timestamp_ms,

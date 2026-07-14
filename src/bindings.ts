@@ -307,7 +307,13 @@ async getEventDecisions(runId: string) : Promise<Result<EventDecision[], Command
  * Arpeggiator patterns
  */
 export type ArpPattern = "Up158" | "Down851" | "Alternating" | "Random"
-export type ArrangeEventsInput = { events: QuantizedEvent[]; template: string; theme_name: string; bpm: number; time_signature: string; division: string; feel: string; swing_amount: number; bar_count: number; b_emphasis: number }
+export type ArrangeEventsInput = { events: QuantizedEvent[]; template: string; theme_name: string; bpm: number; time_signature: string; division: string; feel: string; swing_amount: number; bar_count: number; b_emphasis: number; 
+/**
+ * Grid phase offset (ms) from tempo estimation. Anchors the arrangement grid
+ * (chord boundaries, beat placement) to the performer's downbeat. Defaults to
+ * 0.0 for back-compat.
+ */
+phase_offset_ms?: number | null }
 /**
  * An arranged note with timing and MIDI parameters
  */
@@ -549,7 +555,12 @@ peak_amplitude: number;
  * Typical ranges: plosive ~4-10, sustained hum ~1.2-2.0
  */
 crest_factor?: number }
-export type ExportMidiInput = { arrangement: Arrangement; bpm: number; time_signature: string; division: string; feel: string; swing_amount: number; bar_count: number; ppq: number | null; include_tempo: boolean | null; include_time_signature: boolean | null; track_names: boolean | null }
+export type ExportMidiInput = { arrangement: Arrangement; bpm: number; time_signature: string; division: string; feel: string; swing_amount: number; bar_count: number; ppq: number | null; include_tempo: boolean | null; include_time_signature: boolean | null; track_names: boolean | null; 
+/**
+ * Grid phase offset (ms) from tempo estimation. Extends grid duration so a
+ * phase-shifted arrangement's tail isn't truncated on export. Defaults to 0.0.
+ */
+phase_offset_ms?: number | null }
 export type ExtractFeaturesInput = { audio_data: number[]; start_ms: number; duration_ms: number }
 /**
  * Effects profiles
@@ -575,7 +586,12 @@ export type OnsetData = { timestamp_ms: number; strength: number }
 export type OnsetDetectionResult = { onsets: OnsetData[]; total_count: number }
 export type Project = { id: string; created_at: string; name: string; input_path: string; input_sha256: string; duration_ms: number }
 export type ProjectSummary = { id: string; name: string; created_at: string; duration_ms: number; run_count: number }
-export type QuantizeEventsInput = { events: EventData[]; bpm: number; time_signature: string; division: string; feel: string; swing_amount: number; bar_count: number; quantize_strength: number; lookahead_ms: number }
+export type QuantizeEventsInput = { events: EventData[]; bpm: number; time_signature: string; division: string; feel: string; swing_amount: number; bar_count: number; quantize_strength: number; lookahead_ms: number; 
+/**
+ * Grid phase offset (ms) from tempo estimation. Anchors the quantization grid
+ * to the performer's downbeat. Defaults to 0.0 (t=0 anchor) for back-compat.
+ */
+phase_offset_ms?: number | null }
 /**
  * A quantized event with both original and quantized timing
  */
