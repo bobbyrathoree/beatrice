@@ -23,7 +23,7 @@ import { loadDetectorNode } from "../worklet/loadDetector";
 import { encodeWav16 } from "../audio/renderWav";
 import { JamBuffer } from "./jamBuffer";
 import { negotiateRecorderMimeType } from "./recorderMime";
-import { loadCalibrationSamples } from "./calibrationStore";
+import { loadCalibrationSamples, isCalibrationSufficient } from "./calibrationStore";
 
 /** EventClass id emitted by the WASM detector (0=kick,1=hihat,2=snare/click,3=hum). */
 export type JamClassId = 0 | 1 | 2 | 3;
@@ -59,6 +59,14 @@ export interface JamSession {
   level: number;
   /** the live AnalyserNode, for the waveform canvas (null until ready) */
   analyser: AnalyserNode | null;
+  /**
+   * true when start() re-seeded the live detector with a SUFFICIENT persisted
+   * profile (≥5 samples for all 4 classes). The returning user's calibration is
+   * usable immediately — the panel opens in its `restored` state so the
+   * HEURISTIC/YOURS toggle works without re-teaching. false when there was no
+   * usable persisted profile (fresh session).
+   */
+  calibrationRestored: boolean;
   /** begin a jam session: mic -> worklet (visual) + parallel WAV recording */
   start: () => Promise<void>;
   /** stop and discard everything (no WAV) */
@@ -72,6 +80,13 @@ export interface JamSession {
   addCalibrationSample: (classId: JamClassId, features: number[]) => void;
   /** Flip the HEURISTIC/YOURS A/B toggle on the live detector. */
   setCalibrationEnabled: (enabled: boolean) => void;
+  /**
+   * Drop the live detector's calibration profile (kNN reverts to heuristic).
+   * Called when a re-teach begins so freshly taught samples don't append onto a
+   * profile re-seeded at start — otherwise the worklet and localStorage would
+   * drift (Finding 2).
+   */
+  resetCalibration: () => void;
 }
 
 /** How many seconds of the rolling mic recording capture() keeps. */
@@ -88,6 +103,7 @@ export function useJamSession(): JamSession {
   const [eventCount, setEventCount] = useState(0);
   const [level, setLevel] = useState(0);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
+  const [calibrationRestored, setCalibrationRestored] = useState(false);
 
   const ctxRef = useRef<AudioContext | null>(null);
   const nodeRef = useRef<AudioWorkletNode | null>(null);
@@ -137,6 +153,7 @@ export function useJamSession(): JamSession {
     setError(null);
     setLiveEvents([]);
     setEventCount(0);
+    setCalibrationRestored(false);
     bufferRef.current = new JamBuffer(BUFFER_WINDOW_MS);
     keyRef.current = 0;
     chunksRef.current = [];
@@ -232,6 +249,12 @@ export function useJamSession(): JamSession {
       // keeps their personalization. Samples cross the wasm boundary the same
       // way live teaching does. Calibration stays OFF until the user flips the
       // A/B toggle — re-seeding only makes YOURS available, it does not force it.
+      //
+      // When the persisted set is SUFFICIENT (≥5 samples for all 4 classes) the
+      // returning user's profile is usable immediately: we flag it so the panel
+      // can open in its `restored` state and expose the toggle without forcing a
+      // re-teach (Finding 1). An insufficient set is still re-seeded (it keeps
+      // whatever partial samples exist) but does not surface the toggle.
       const persisted = loadCalibrationSamples();
       if (persisted && persisted.length > 0) {
         for (const s of persisted) {
@@ -241,6 +264,7 @@ export function useJamSession(): JamSession {
             features: s.features,
           });
         }
+        setCalibrationRestored(isCalibrationSufficient(persisted));
       }
 
       // Mic -> detector (silent; connected to destination so process() is
@@ -332,6 +356,13 @@ export function useJamSession(): JamSession {
     nodeRef.current?.port.postMessage({ type: "setCalibration", enabled });
   }, []);
 
+  const resetCalibration = useCallback(() => {
+    // Clearing the worklet profile means a just-restored session is no longer
+    // "restored" — the user is teaching a fresh profile from scratch.
+    setCalibrationRestored(false);
+    nodeRef.current?.port.postMessage({ type: "resetCalibration" });
+  }, []);
+
   return {
     isRunning,
     error,
@@ -339,10 +370,12 @@ export function useJamSession(): JamSession {
     eventCount,
     level,
     analyser,
+    calibrationRestored,
     start,
     stop,
     capture,
     addCalibrationSample,
     setCalibrationEnabled,
+    resetCalibration,
   };
 }

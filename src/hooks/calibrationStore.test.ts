@@ -4,6 +4,8 @@ import {
   saveCalibrationSamples,
   loadCalibrationSamples,
   clearCalibrationSamples,
+  isCalibrationSufficient,
+  MIN_SAMPLES_PER_CLASS,
   type CalibrationSampleInput,
 } from "./calibrationStore";
 
@@ -68,5 +70,35 @@ describe("localStorage round-trip", () => {
   it("survives non-array garbage", () => {
     localStorage.setItem("beatrice.calibration.v1", "{}");
     expect(loadCalibrationSamples()).toBeNull();
+  });
+});
+
+describe("isCalibrationSufficient", () => {
+  /** Build a full profile with `n` samples for every class (0..3). */
+  const fullProfile = (n: number): CalibrationSampleInput[] =>
+    [0, 1, 2, 3].flatMap((classId) => Array.from({ length: n }, () => sample(classId)));
+
+  it("is false for null / empty", () => {
+    expect(isCalibrationSufficient(null)).toBe(false);
+    expect(isCalibrationSufficient([])).toBe(false);
+  });
+
+  it("is true only with >= MIN_SAMPLES_PER_CLASS for all four classes", () => {
+    // Mirrors the Rust is_sufficient bar (matches the re-seed activation rule).
+    expect(isCalibrationSufficient(fullProfile(MIN_SAMPLES_PER_CLASS))).toBe(true);
+    expect(isCalibrationSufficient(fullProfile(MIN_SAMPLES_PER_CLASS + 3))).toBe(true);
+    // One short on the last class.
+    const short = [...fullProfile(MIN_SAMPLES_PER_CLASS)];
+    const lastClassIdx = short.map((s) => s.classId).lastIndexOf(3);
+    short.splice(lastClassIdx, 1);
+    expect(isCalibrationSufficient(short)).toBe(false);
+  });
+
+  it("is false when a class is entirely missing", () => {
+    // Classes 0,1,2 fully taught but class 3 (HUM) absent.
+    const missingHum = [0, 1, 2].flatMap((classId) =>
+      Array.from({ length: MIN_SAMPLES_PER_CLASS }, () => sample(classId))
+    );
+    expect(isCalibrationSufficient(missingHum)).toBe(false);
   });
 });

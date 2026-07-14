@@ -7,11 +7,17 @@
 // caller when it dispatches RECORD_SAMPLE, keeping this module pure.
 //
 // FLOW: idle → teaching(classIdx, samplesSoFar) → ... → done
-//   - START enters teaching for class 0 with 0 samples.
+//   - START enters teaching for class 0 with 0 samples (also the RE-TEACH path
+//     out of `done`/`restored`).
 //   - RECORD_SAMPLE bumps samplesSoFar; at SAMPLES_PER_CLASS it advances to the
 //     next class (resetting the per-class counter), or to `done` after the last.
 //   - CANCEL returns to idle from anywhere.
 //   - RESET returns to idle (e.g. after persisting on done).
+//   - RESTORE enters `restored` — the entry state for a RETURNING session whose
+//     persisted profile was re-seeded onto the worklet and is already SUFFICIENT.
+//     It renders the same HEURISTIC/YOURS toggle as `done` plus a RE-TEACH
+//     button, so the toggle works immediately without re-teaching all 20 samples
+//     (Finding 1). `restored` is not reached by teaching — only by RESTORE.
 
 /** The four classes to teach, in prompt order. classId === index. */
 export const CALIBRATION_CLASSES = [
@@ -24,7 +30,7 @@ export const CALIBRATION_CLASSES = [
 /** Samples required per class before advancing (matches Rust is_sufficient). */
 export const SAMPLES_PER_CLASS = 5;
 
-export type CalibrationPhase = "idle" | "teaching" | "done";
+export type CalibrationPhase = "idle" | "teaching" | "done" | "restored";
 
 export interface CalibrationState {
   phase: CalibrationPhase;
@@ -38,7 +44,8 @@ export type CalibrationAction =
   | { type: "START" }
   | { type: "RECORD_SAMPLE" }
   | { type: "CANCEL" }
-  | { type: "RESET" };
+  | { type: "RESET" }
+  | { type: "RESTORE" };
 
 export const INITIAL_CALIBRATION_STATE: CalibrationState = {
   phase: "idle",
@@ -71,6 +78,16 @@ export function calibrationReducer(
       }
       return { phase: "teaching", classIdx: nextClass, samplesSoFar: 0 };
     }
+
+    case "RESTORE":
+      // A returning session re-seeded a SUFFICIENT persisted profile onto the
+      // worklet. Enter `restored` so the panel exposes the HEURISTIC/YOURS
+      // toggle immediately, without re-teaching (Finding 1). Ignored once the
+      // user is already mid-teach or has just finished (`teaching`/`done`) so a
+      // late restore signal can't clobber live progress; only a fresh `idle`
+      // panel adopts the restored profile.
+      if (state.phase !== "idle") return state;
+      return { phase: "restored", classIdx: 0, samplesSoFar: 0 };
 
     case "CANCEL":
     case "RESET":

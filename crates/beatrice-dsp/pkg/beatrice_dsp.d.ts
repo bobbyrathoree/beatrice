@@ -40,6 +40,14 @@ export class WasmDetector {
      */
     calibration_profile_json(): Uint8Array;
     /**
+     * Drop the live calibration profile (kNN reverts to `None`, so
+     * classification falls back to the heuristic). Sent when a re-teach begins
+     * so new samples do not APPEND onto a profile the worklet was re-seeded with
+     * on jam start — otherwise the live profile would drift from what the panel
+     * accumulates and persists to localStorage.
+     */
+    clear_calibration(): void;
+    /**
      * Whether the accumulated profile has ≥5 samples for all 4 classes.
      */
     is_calibration_sufficient(): boolean;
@@ -63,6 +71,7 @@ export interface InitOutput {
     readonly __wbg_wasmdetector_free: (a: number, b: number) => void;
     readonly wasmdetector_add_calibration_sample: (a: number, b: number, c: number, d: number) => void;
     readonly wasmdetector_calibration_profile_json: (a: number) => [number, number];
+    readonly wasmdetector_clear_calibration: (a: number) => void;
     readonly wasmdetector_is_calibration_sufficient: (a: number) => number;
     readonly wasmdetector_new: (a: number) => number;
     readonly wasmdetector_push: (a: number, b: number, c: number) => [number, number];

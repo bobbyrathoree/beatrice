@@ -20,6 +20,9 @@
 //   { type: "calibrate", classId, features }
 //                                        add a labeled few-shot sample (Task 5)
 //   { type: "setCalibration", enabled }  flip the HEURISTIC/YOURS A/B toggle
+//   { type: "resetCalibration" }         drop the live profile before a re-teach
+//                                        (so new samples don't append onto a
+//                                        re-seeded profile — kNN reverts to None)
 //
 // WASM push() ABI: a flat Float32Array of EVENT_STRIDE (10) floats per event —
 //   [tMs, classId, conf, centroid, zcr, low, mid, high, peak, crest]
@@ -64,7 +67,14 @@ interface SetCalibrationMessage {
   type: "setCalibration";
   enabled: boolean;
 }
-type InboundMessage = WasmMessage | CalibrateMessage | SetCalibrationMessage;
+interface ResetCalibrationMessage {
+  type: "resetCalibration";
+}
+type InboundMessage =
+  | WasmMessage
+  | CalibrateMessage
+  | SetCalibrationMessage
+  | ResetCalibrationMessage;
 
 class DetectorProcessor extends AudioWorkletProcessor {
   private det: WasmDetector | null = null;
@@ -90,6 +100,10 @@ class DetectorProcessor extends AudioWorkletProcessor {
       } else if (msg.type === "setCalibration") {
         // A/B toggle: kNN-first (personal) vs heuristic-only.
         this.det?.set_calibration_enabled(!!msg.enabled);
+      } else if (msg.type === "resetCalibration") {
+        // Re-teach begins: drop any re-seeded profile so fresh samples don't
+        // append onto it (kNN reverts to None until the new profile refills).
+        this.det?.clear_calibration();
       }
     };
   }

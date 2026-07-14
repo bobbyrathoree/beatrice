@@ -31,11 +31,13 @@ export function JamScreen({ onProjectCreated, onError, onExit }: JamScreenProps)
     eventCount,
     level,
     analyser,
+    calibrationRestored,
     start,
     stop,
     capture,
     addCalibrationSample,
     setCalibrationEnabled,
+    resetCalibration,
   } = useJamSession();
   const [isCapturing, setIsCapturing] = useState(false);
   const [showCalibration, setShowCalibration] = useState(false);
@@ -48,6 +50,14 @@ export function JamScreen({ onProjectCreated, onError, onExit }: JamScreenProps)
   useEffect(() => {
     if (error) onError(error);
   }, [error, onError]);
+
+  // Returning session: if start() re-seeded a sufficient saved profile, open the
+  // calibration panel so the live HEURISTIC/YOURS toggle is reachable right away
+  // (Finding 1) — otherwise the returning user would have to hunt for TEACH to
+  // activate a profile they already trained.
+  useEffect(() => {
+    if (calibrationRestored) setShowCalibration(true);
+  }, [calibrationRestored]);
 
   // Tear the session down if the user navigates away without capturing.
   useEffect(() => {
@@ -242,8 +252,10 @@ export function JamScreen({ onProjectCreated, onError, onExit }: JamScreenProps)
         <CalibrationPanel
           latestEvent={latestEvent}
           isRunning={isRunning}
+          calibrationRestored={calibrationRestored}
           onSample={addCalibrationSample}
           onToggle={setCalibrationEnabled}
+          onResetCalibration={resetCalibration}
           onClose={() => setShowCalibration(false)}
         />
       )}

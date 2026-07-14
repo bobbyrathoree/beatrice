@@ -36,10 +36,21 @@ interface CalibrationPanelProps {
   latestEvent: JamLiveEvent | null;
   /** true when the live detector is running (teaching requires a live mic). */
   isRunning: boolean;
+  /**
+   * true when the session re-seeded a SUFFICIENT persisted profile onto the
+   * worklet at start. The panel then opens in its `restored` state so the
+   * HEURISTIC/YOURS toggle works immediately, without re-teaching (Finding 1).
+   */
+  calibrationRestored: boolean;
   /** Echo a labeled sample to the worklet. */
   onSample: (classId: JamClassId, features: number[]) => void;
   /** Flip the live HEURISTIC/YOURS toggle. */
   onToggle: (enabled: boolean) => void;
+  /**
+   * Clear the worklet's live calibration profile. Called when a re-teach begins
+   * so freshly taught samples don't append onto a re-seeded profile (Finding 2).
+   */
+  onResetCalibration: () => void;
   /** Close the panel. */
   onClose: () => void;
 }
@@ -47,8 +58,10 @@ interface CalibrationPanelProps {
 export function CalibrationPanel({
   latestEvent,
   isRunning,
+  calibrationRestored,
   onSample,
   onToggle,
+  onResetCalibration,
   onClose,
 }: CalibrationPanelProps) {
   const [state, dispatch] = useReducer(calibrationReducer, INITIAL_CALIBRATION_STATE);
@@ -87,9 +100,22 @@ export function CalibrationPanel({
     onToggle(true);
   }, [state.phase, saved, onToggle]);
 
+  // Returning session: when the hook reports a SUFFICIENT re-seeded profile,
+  // enter `restored` so the toggle is live immediately (Finding 1). The reducer
+  // ignores RESTORE unless idle, so this can't clobber a teach already underway.
+  useEffect(() => {
+    if (calibrationRestored) dispatch({ type: "RESTORE" });
+  }, [calibrationRestored]);
+
   const handleStart = () => {
+    // Re-teach begins here (fresh TEACH, "teach again" from done, or RE-TEACH
+    // from restored). Clear the worklet's live profile first so new samples do
+    // NOT append onto a re-seeded profile — otherwise the worklet and the
+    // localStorage snapshot we persist on done would drift (Finding 2).
+    onResetCalibration();
     samplesRef.current = [];
     lastKeyRef.current = latestEvent?.key ?? null; // don't consume a stale event
+    setPersonal(false); // re-teaching starts on HEURISTIC until done re-enables
     setSaved(false);
     dispatch({ type: "START" });
   };
@@ -199,9 +225,30 @@ export function CalibrationPanel({
         </>
       )}
 
-      {/* A/B toggle — available once a profile exists (done). Flips how the live
-          detector classifies subsequent events, changing the flash tiles. */}
-      {state.phase === "done" && (
+      {/* Returning session: a saved profile was re-seeded onto the worklet and
+          is sufficient, so the toggle below is live immediately — no re-teach
+          needed (Finding 1). RE-TEACH clears the worklet profile and restarts
+          the flow from scratch (Finding 2). */}
+      {state.phase === "restored" && (
+        <>
+          <p style={{ fontSize: 15, margin: 0, color: "#0f0" }} data-testid="calibration-restored">
+            ✓ Your saved voice is loaded. Flip the toggle to compare — or re-teach it.
+          </p>
+          <button
+            className="btn"
+            data-testid="calibration-reteach"
+            onClick={handleStart}
+            disabled={!isRunning}
+          >
+            {isRunning ? "↻ RE-TEACH" : "start the jam first"}
+          </button>
+        </>
+      )}
+
+      {/* A/B toggle — available once a profile exists (done) OR was restored from
+          a persisted profile. Flips how the live detector classifies subsequent
+          events, changing the flash tiles. */}
+      {(state.phase === "done" || state.phase === "restored") && (
         <button
           data-testid="calibration-toggle"
           data-personal={personal}

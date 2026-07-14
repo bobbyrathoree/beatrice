@@ -73,4 +73,38 @@ describe("calibrationReducer", () => {
     expect(calibrationReducer(mid, { type: "CANCEL" })).toEqual(INITIAL_CALIBRATION_STATE);
     expect(calibrationReducer(mid, { type: "RESET" })).toEqual(INITIAL_CALIBRATION_STATE);
   });
+
+  it("RESTORE enters the restored state from idle (returning session)", () => {
+    const s = calibrationReducer(INITIAL_CALIBRATION_STATE, { type: "RESTORE" });
+    expect(s).toEqual({ phase: "restored", classIdx: 0, samplesSoFar: 0 });
+  });
+
+  it("RESTORE is ignored once teaching or done (no clobbering live progress)", () => {
+    const teaching = run([{ type: "START" }, { type: "RECORD_SAMPLE" }]);
+    expect(calibrationReducer(teaching, { type: "RESTORE" })).toEqual(teaching);
+
+    const done = run([
+      { type: "START" },
+      ...Array<{ type: "RECORD_SAMPLE" }>(TOTAL_SAMPLES).fill({ type: "RECORD_SAMPLE" }),
+    ]);
+    expect(done.phase).toBe("done");
+    expect(calibrationReducer(done, { type: "RESTORE" })).toEqual(done);
+  });
+
+  it("RECORD_SAMPLE is ignored in restored (the toggle is live, not teaching)", () => {
+    const restored = calibrationReducer(INITIAL_CALIBRATION_STATE, { type: "RESTORE" });
+    expect(calibrationReducer(restored, { type: "RECORD_SAMPLE" })).toEqual(restored);
+  });
+
+  it("START re-teaches out of restored (RE-TEACH button)", () => {
+    const restored = calibrationReducer(INITIAL_CALIBRATION_STATE, { type: "RESTORE" });
+    const s = calibrationReducer(restored, { type: "START" });
+    expect(s).toEqual({ phase: "teaching", classIdx: 0, samplesSoFar: 0 });
+  });
+
+  it("CANCEL and RESET leave restored back to idle", () => {
+    const restored = calibrationReducer(INITIAL_CALIBRATION_STATE, { type: "RESTORE" });
+    expect(calibrationReducer(restored, { type: "CANCEL" })).toEqual(INITIAL_CALIBRATION_STATE);
+    expect(calibrationReducer(restored, { type: "RESET" })).toEqual(INITIAL_CALIBRATION_STATE);
+  });
 });

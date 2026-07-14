@@ -31,6 +31,33 @@ export interface CalibrationSampleInput {
 /** classId -> Rust EventClass variant name (index === classId). */
 const CLASS_NAMES = ["BilabialPlosive", "HihatNoise", "Click", "HumVoiced"] as const;
 
+/**
+ * Minimum samples PER CLASS for a profile to classify with kNN. Mirrors the
+ * Rust `CalibrationProfile::is_sufficient` (≥5 for all 4 classes) and the
+ * `SAMPLES_PER_CLASS` the teach flow collects. Kept here so the frontend can
+ * decide whether a re-seeded profile is immediately usable without a wasm call.
+ */
+export const MIN_SAMPLES_PER_CLASS = 5;
+/** The four classIds a sufficient profile must cover (0=kick..3=hum). */
+const REQUIRED_CLASS_IDS = [0, 1, 2, 3] as const;
+
+/**
+ * Whether a set of samples is sufficient for kNN — ≥`MIN_SAMPLES_PER_CLASS` for
+ * ALL four classes (the same bar as Rust `is_sufficient`). A re-seeded profile
+ * that clears this bar can be activated immediately in a returning session
+ * (the HEURISTIC/YOURS toggle works without re-teaching).
+ */
+export function isCalibrationSufficient(
+  samples: CalibrationSampleInput[] | null | undefined
+): boolean {
+  if (!samples || samples.length === 0) return false;
+  const counts = new Map<number, number>();
+  for (const s of samples) {
+    counts.set(s.classId, (counts.get(s.classId) ?? 0) + 1);
+  }
+  return REQUIRED_CLASS_IDS.every((id) => (counts.get(id) ?? 0) >= MIN_SAMPLES_PER_CLASS);
+}
+
 /** localStorage key (versioned so a shape change can't crash on stale data). */
 const LS_KEY = "beatrice.calibration.v1";
 const SAMPLE_RATE = 44100;

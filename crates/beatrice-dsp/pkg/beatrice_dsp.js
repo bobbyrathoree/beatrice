@@ -59,6 +59,16 @@ export class WasmDetector {
         return v1;
     }
     /**
+     * Drop the live calibration profile (kNN reverts to `None`, so
+     * classification falls back to the heuristic). Sent when a re-teach begins
+     * so new samples do not APPEND onto a profile the worklet was re-seeded with
+     * on jam start — otherwise the live profile would drift from what the panel
+     * accumulates and persists to localStorage.
+     */
+    clear_calibration() {
+        wasm.wasmdetector_clear_calibration(this.__wbg_ptr);
+    }
+    /**
      * Whether the accumulated profile has ≥5 samples for all 4 classes.
      * @returns {boolean}
      */

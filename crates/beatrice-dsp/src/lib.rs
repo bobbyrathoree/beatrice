@@ -175,6 +175,15 @@ impl WasmDetector {
         self.0.set_calibration_enabled(enabled);
     }
 
+    /// Drop the live calibration profile (kNN reverts to `None`, so
+    /// classification falls back to the heuristic). Sent when a re-teach begins
+    /// so new samples do not APPEND onto a profile the worklet was re-seeded with
+    /// on jam start — otherwise the live profile would drift from what the panel
+    /// accumulates and persists to localStorage.
+    pub fn clear_calibration(&mut self) {
+        self.0.clear_calibration();
+    }
+
     /// Whether the accumulated profile has ≥5 samples for all 4 classes.
     pub fn is_calibration_sufficient(&self) -> bool {
         self.0.is_calibration_sufficient()

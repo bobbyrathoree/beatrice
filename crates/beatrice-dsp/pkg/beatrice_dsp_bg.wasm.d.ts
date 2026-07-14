@@ -4,6 +4,7 @@ export const memory: WebAssembly.Memory;
 export const __wbg_wasmdetector_free: (a: number, b: number) => void;
 export const wasmdetector_add_calibration_sample: (a: number, b: number, c: number, d: number) => void;
 export const wasmdetector_calibration_profile_json: (a: number) => [number, number];
+export const wasmdetector_clear_calibration: (a: number) => void;
 export const wasmdetector_is_calibration_sufficient: (a: number) => number;
 export const wasmdetector_new: (a: number) => number;
 export const wasmdetector_push: (a: number, b: number, c: number) => [number, number];

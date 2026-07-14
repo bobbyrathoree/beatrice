@@ -287,6 +287,22 @@ impl StreamingDetector {
         self.calibration_enabled = enabled;
     }
 
+    /// Drop the accumulated calibration profile and rebuild the kNN classifier
+    /// (which becomes `None`, so classification falls back to the heuristic).
+    ///
+    /// Used when a re-teach begins: the worklet may have been re-seeded with a
+    /// persisted profile on jam start, so `add_calibration_sample` would
+    /// otherwise APPEND the new session's samples onto the old ones — drifting
+    /// the live profile away from what the panel accumulates and later persists.
+    /// Clearing first makes a re-teach start from a clean profile. The A/B
+    /// toggle (`calibration_enabled`) is left untouched; with an empty profile
+    /// `knn` is `None`, so `classify` uses the heuristic until enough new
+    /// samples are taught.
+    pub fn clear_calibration(&mut self) {
+        self.profile = CalibrationProfile::new("live".to_string());
+        self.rebuild_knn();
+    }
+
     /// Whether the accumulated profile has enough samples to classify with kNN.
     pub fn is_calibration_sufficient(&self) -> bool {
         self.profile.is_sufficient()
@@ -732,6 +748,46 @@ mod tests {
             EventClass::Click,
             "with calibration on kNN should override the heuristic"
         );
+    }
+
+    #[test]
+    fn clear_calibration_reverts_to_heuristic() {
+        // A re-teach begins on a detector that was re-seeded with a sufficient
+        // profile. clear_calibration() must drop the profile so the SAME probe
+        // stops classifying by the (weird) taught verdict and falls back to the
+        // heuristic — even with the A/B toggle still ON. Then re-teaching from
+        // scratch must make kNN sufficient again.
+        let mut det = StreamingDetector::new(44_100);
+        det.set_calibration_enabled(true);
+
+        teach(&mut det, EventClass::Click, hihat_like()); // weird lesson
+        teach(&mut det, EventClass::BilabialPlosive, kick_like());
+        teach(&mut det, EventClass::HihatNoise, other_hat());
+        teach(&mut det, EventClass::HumVoiced, hum_like());
+        assert!(det.is_calibration_sufficient());
+        assert_eq!(
+            det.classify(&hihat_like()).0,
+            EventClass::Click,
+            "sufficient calibration should classify by the taught verdict"
+        );
+
+        // Clear: profile emptied, knn rebuilt to None → heuristic wins again
+        // despite calibration_enabled staying true.
+        det.clear_calibration();
+        assert!(!det.is_calibration_sufficient(), "profile should be empty after clear");
+        assert_eq!(
+            det.classify(&hihat_like()).0,
+            EventClass::HihatNoise,
+            "after clear, classify must fall back to the heuristic"
+        );
+
+        // Re-teaching from the clean profile makes kNN sufficient again.
+        teach(&mut det, EventClass::Click, hihat_like());
+        teach(&mut det, EventClass::BilabialPlosive, kick_like());
+        teach(&mut det, EventClass::HihatNoise, other_hat());
+        teach(&mut det, EventClass::HumVoiced, hum_like());
+        assert!(det.is_calibration_sufficient());
+        assert_eq!(det.classify(&hihat_like()).0, EventClass::Click);
     }
 
     #[test]
