@@ -163,9 +163,15 @@ export default function JamSpike() {
           if (pendingEmitPerf !== null) {
             const detectMs = performance.now() - pendingEmitPerf;
             results.detectMs.push(detectMs);
-            // Estimated mouth-to-sound: detection + the kick's own output
-            // latency before it reaches the speaker.
-            results.soundMs.push(detectMs + results.outputLatencyMs);
+            // Mouth-to-sound == detectMs. Do NOT add outputLatencyMs — that
+            // double-counts the output path. detectMs is measured from click
+            // SCHEDULE to worklet hit message, so it already contains one full
+            // output traversal: the stimulus click's DAC+speaker time (air +
+            // ADC + input buffer + compute + message follow). That single
+            // output path stands in for the response kick's output path — the
+            // chain has exactly one output leg either way — so detectMs is
+            // itself the correct mouth-to-ear proxy. (See docs/latency.md.)
+            results.soundMs.push(detectMs);
             pendingEmitPerf = null;
             if (pendingTimer) clearTimeout(pendingTimer);
             repResolve?.();

@@ -51,6 +51,27 @@ devices bypass real ADC/DAC latency and would make the acoustic number a lie).
 `--use-fake-ui-for-media-stream` is passed only to auto-accept the mic
 permission prompt — it still uses the **REAL default mic**.
 
+### Why mouth-to-sound == `detectMs` (no `outputLatency` add-on)
+
+`detectMs` is measured from click **schedule** (`performance.now()` at
+`src.start()`) to the worklet's `hit` message. That interval already contains
+**one full output-path traversal** — the stimulus click's DAC-buffer + speaker
++ air-transit time — followed by ADC-in + input buffer + worklet quantum + WASM
+compute + port message. In a real jam the chain is symmetric: mouth → mic →
+detect → **kick out the speakers**, i.e. one output leg on the *response* side
+instead of the *stimulus* side. Either way the mouth-to-ear path contains
+**exactly one output traversal**, and the loopback round trip already includes
+it. So `soundMs = detectMs`; the true acoustic output delay is already *inside*
+the measured loopback round trip.
+
+**Correction (2026-07-14):** an earlier revision of `JamSpike.tsx` computed
+`soundMs = detectMs + outputLatencyMs`, which double-counts that output leg on
+any platform reporting nonzero `AudioContext.outputLatency`. Chromium reported
+`outputLatency = 0` on this build, so the numbers in this doc are unaffected
+(mouth-to-sound == detector delta throughout the Results table). The code has
+been corrected to `soundMs = detectMs` to match this reasoning; the fix only
+changes behaviour on platforms that report a nonzero `outputLatency`.
+
 ### Hardware / environment
 
 - Machine: Apple Silicon MacBook Pro (aarch64), macOS (Darwin 25.4.0)
@@ -123,8 +144,9 @@ buffering, and the mic input quantum. That is the wall for full jam, and it is
   gap, smaller buffers) could plausibly close the gap, but we cannot ship
   assuming users have them. The gate is written for commodity hardware, and
   commodity hardware fails it.
-- Tauri/WKWebView runtime (see "Tauri runtime status" — recorded as OPEN with a
-  known CSP blocker and exact repro instructions).
+- ~~Tauri/WKWebView runtime~~ — now VERIFIED READY; see "Tauri runtime status"
+  below (worklet + WASM reach "ready", 20/20 hits, with the `'wasm-unsafe-eval'`
+  CSP fix applied).
 
 ---
 
@@ -205,42 +227,72 @@ in the brief needed correcting. All are now encoded in the committed code.
 
 ---
 
-## Tauri runtime status — **OPEN (not verified in WKWebView)**
+## Tauri runtime status — **VERIFIED READY in WKWebView (2026-07-14)**
 
-Spike acceptance (b) asks the `/jam-spike` route to print "ready" in the Tauri
-window too. This is recorded as **OPEN**, with two concrete, gate-relevant
-blockers found and exact repro instructions:
+Spike acceptance (b) asks the `/jam-spike` route to reach "ready" in the Tauri
+window too. **Now verified: the worklet + WASM handshake reaches "ready" and
+runs the full harness (20/20 hits) inside the Tauri WKWebView.**
 
-1. **CSP blocks WASM compile.** `src-tauri/tauri.conf.json` sets
-   `script-src 'self'`. WKWebView requires `script-src 'self'
-   'wasm-unsafe-eval'` to allow `new WebAssembly.Module(bytes)` /
-   `WebAssembly.Instance`. As configured, the worklet's `initSync` will be
-   blocked in the Tauri window. **Action for Task 2/4:** add
-   `'wasm-unsafe-eval'` to `script-src` (and confirm `worker-src`/`child-src`
-   allow the blob/asset worklet URL).
-2. **`cargo tauri dev` uses the Vite DEV server** (`beforeDevCommand: npm run
-   dev`, `devUrl: http://localhost:1420`), which does not complete the worklet
-   handshake (finding #5). A meaningful Tauri check must load the **bundled**
-   frontend.
+- **Runtime:** WKWebView on macOS 26.4.1 (WebKit), Tauri v2.11.5 / wry 0.55.1,
+  Apple M4 Pro. Native `beatrice` bin (`cargo tauri dev -- --bin beatrice`).
+- **CSP fix applied:** `src-tauri/tauri.conf.json` `script-src` is now
+  `'self' 'wasm-unsafe-eval'` (was `'self'`).
+- **Result:** state machine reached `starting → ready → done (20 hits, 0
+  misses)` in synthetic mode. "ready" fires immediately after the worklet's
+  `initSync` runs `new WebAssembly.Module(bytes)` and posts `ready`, i.e. WASM
+  compiled successfully on the audio render thread in WKWebView.
 
-**How to verify Tauri (do this in Task 4 with the CSP fix applied):**
+### Verification recipe (used)
+
+`screencapture` was TCC-blocked (Screen Recording denied to the shell) and
+Accessibility (`osascript`/System Events) was denied, so the documented on-page
+screenshot could not be captured in this environment. Substituted an equivalent
+scriptable proof: a same-origin status **beacon** (a temporary `?beacon`-gated
+`fetch("/__beacon", ...)` in `JamSpike.tsx`, allowed by `connect-src 'self'`,
+reverted before commit) posting each status transition to a small static server
+that also serves the production `dist/`. Steps:
 
 ```bash
 npm run build
-npx vite preview --port 1420 --strictPort &
-# Temporarily point Tauri at the preview server WITHOUT rebuilding the frontend:
-#   set build.beforeDevCommand to ""  and  devUrl to http://localhost:1420
-# then:
-cargo tauri dev
-# In the WKWebView window, navigate to /jam-spike and watch the big status
-# badge (data-testid="jam-status") go READY -> RUNNING -> DONE. Playwright
-# cannot drive WKWebView, so the on-page badge is the screenshot-able proof.
+# static server serving dist/ with SPA fallback + POST /__beacon logging,
+# delivering the CSP as a real HTTP header (see negative-control note below)
+CSP_HEADER="<the tauri.conf CSP string>" node spike-server.mjs ./dist 1420 &
+# point Tauri at the built page without a Vite dev server / rebuild:
+#   build.beforeDevCommand = ""   devUrl = http://localhost:1420/jam-spike?beacon&mode=synthetic
+cargo tauri dev -- --bin beatrice   # --bin needed: workspace has 3 binaries
+# read the beacon trace: starting -> ready -> done (20 hits, 0 misses)
 ```
 
-We did not flip the CSP or run the full Tauri build in this spike (timeboxed,
-and the acoustic NO-GO already decides the gate). The native `beatrice` crate
-**does** compile cleanly inside the new Cargo workspace (`cargo check -p
-beatrice`), so the workspace change did not regress the Tauri build.
+The badge (`data-testid="jam-status"`) reaches "ready" (worklet + WASM loaded)
+**before** the mic is touched — in loopback `getUserMedia` runs only after
+"ready" — so the WASM/worklet proof does not depend on mic-permission state.
+Synthetic mode (no mic, no speakers) was used so the full trace completes
+unattended.
+
+### Load-bearing correction: `script-src` does NOT gate WASM on this WebKit
+
+A controlled A/B with the exact CSP delivered as an enforced **HTTP header**
+(Tauri does **not** inject its conf CSP into an external `devUrl` response — an
+inline `eval()` probe was `ALLOWED` under devUrl, proving the conf CSP is not
+applied to that origin; a header CSP is, so the header path is the honest test)
+showed:
+
+| CSP `script-src` | `eval()` | `new WebAssembly.Module` | handshake |
+|---|---|---|---|
+| `'self'` (old) | **BLOCKED** (`EvalError`) | **ALLOWED** | ready, 20/20 |
+| `'self' 'wasm-unsafe-eval'` (fix) | BLOCKED | ALLOWED | ready, 20/20 |
+
+The `eval-BLOCKED` result confirms CSP *was* being enforced on the origin; WASM
+compiled in **both** cases. So on this WebKit build the anticipated
+`script-src`-blocks-WASM behavior (the spike's documented blocker, which is real
+on Chromium and on WebKit builds that enforce the WASM-CSP integration) **does
+not manifest** — WKWebView here allows WASM regardless. The `'wasm-unsafe-eval'`
+addition is nonetheless kept: it is the spec-correct, forward-compatible policy
+and is required on runtimes that do enforce it; it is simply not load-bearing on
+this particular macOS build.
+
+The native `beatrice` crate also compiles cleanly inside the Cargo workspace, so
+the workspace change did not regress the Tauri build.
 
 ---
 
