@@ -223,14 +223,17 @@ fn test_pattern_tempo_estimation() {
     println!("PATTERN tempo: {:.1} BPM, confidence={:.3}, beats={}",
         estimate.bpm, estimate.confidence, estimate.beat_positions_ms.len());
 
-    // Pattern is at 120 BPM (500ms intervals between events)
-    // Allow tolerance: could detect 120 BPM or harmonics (60, 240)
-    let is_tempo_reasonable = (estimate.bpm > 100.0 && estimate.bpm < 140.0)
-        || (estimate.bpm > 55.0 && estimate.bpm < 65.0)   // half-time
-        || (estimate.bpm > 230.0 && estimate.bpm < 250.0); // double-time
+    // Pattern is at 120 BPM (500ms intervals between events). The onset-coverage
+    // guard in fold_octave (see src/groove/tempo.rs) now prevents the half-time
+    // (~61 BPM) fold this fixture previously exhibited: at 122 BPM all 4 onsets
+    // sit on a beat (coverage 1.0), whereas the ½× grid covers only half of them.
+    // We therefore tightened the assertion from "120 OR ~61 half-time OR ~240
+    // double-time" to the correct ~120 BPM band; a regression back to half-time
+    // would now (rightly) fail here.
+    let is_tempo_reasonable = estimate.bpm > 110.0 && estimate.bpm < 130.0;
 
     assert!(is_tempo_reasonable,
-        "Tempo {:.1} BPM is not near 120 BPM (or its harmonics 60/240)",
+        "Tempo {:.1} BPM is not near the true 120 BPM",
         estimate.bpm);
 }
 

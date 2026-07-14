@@ -289,6 +289,34 @@ fn best_phase_score(onsets: &[Onset], interval_ms: f64, end_time: f64) -> f64 {
     search_best_phase(onsets, interval_ms, end_time).1
 }
 
+/// Fraction of onsets that land within tolerance of *some* beat of the grid
+/// defined by `interval_ms` at its best-aligning phase.
+///
+/// Unlike `score_beat_alignment` (which sums a per-beat proximity), coverage
+/// counts each ONSET once — covered or not — so a candidate is judged by how
+/// many onsets it *explains*, independent of how many beats it has. This is the
+/// quantity that separates a ½× grid (whose beats land on only some of the
+/// onsets) from the true grid (on which every onset lands). Uses the same
+/// `interval * 0.15` tolerance as the alignment scorer for consistency.
+fn onset_coverage(onsets: &[Onset], interval_ms: f64) -> f64 {
+    if onsets.is_empty() || interval_ms <= 0.0 {
+        return 0.0;
+    }
+    let last = onsets.last().map(|o| o.timestamp_ms).unwrap_or(0.0);
+    let (phase, _) = search_best_phase(onsets, interval_ms, last);
+    let tolerance_ms = interval_ms * 0.15;
+    let covered = onsets
+        .iter()
+        .filter(|o| {
+            // Distance from this onset to the NEAREST beat of the grid.
+            let k = ((o.timestamp_ms - phase) / interval_ms).round();
+            let beat = phase + k * interval_ms;
+            (o.timestamp_ms - beat).abs() <= tolerance_ms
+        })
+        .count();
+    covered as f64 / onsets.len() as f64
+}
+
 /// Choose between the histogram's interval and its ½×/2× octaves by scoring
 /// each candidate's per-beat alignment against the onsets.
 ///
@@ -298,6 +326,49 @@ fn best_phase_score(onsets: &[Onset], interval_ms: f64, end_time: f64) -> f64 {
 /// (raw score / beat count) so a shorter interval isn't rewarded merely for
 /// having more beats to hit. A mild 1.05 prior keeps the histogram's own pick
 /// when scores tie. Candidates outside [min_bpm, max_bpm] are skipped.
+///
+/// # Onset-coverage weighting (half-time fix)
+/// Per-beat scoring alone has a half-time bias on sparse *in-range* content.
+/// Concretely, test-pattern.wav (4 onsets ~500ms apart, true ≈120 BPM): the ½×
+/// candidate at ~61 BPM (~983ms beats) lands a beat on every OTHER onset, so its
+/// per-beat *average* is ~1.0, while the correct 121 BPM candidate — with only
+/// ~3 beats of material — is dragged down by the beats that fall in the gaps
+/// between the sparse onsets. So per-beat normalization alone folds it to ~61 BPM
+/// even though that grid leaves half the onsets unexplained. The bias also bites
+/// when the *histogram's own* pick is already the half-time interval (real-audio
+/// test-8bar-progression.wav: 60 BPM pick has coverage 0.28, the correct 120 BPM
+/// double has coverage 0.55, yet 60 wins on per-beat average).
+///
+/// Fix: multiply each candidate's per-beat alignment by its onset COVERAGE — the
+/// fraction of onsets that land within tolerance of *some* beat of that grid
+/// (see `onset_coverage`). Coverage counts onsets-explained, not beats-hit, so a
+/// grid that abandons onsets in the gaps (coverage 0.5) can no longer out-score
+/// one that explains them all (coverage 1.0) merely by having fewer beats. This
+/// directly encodes the invariant: a candidate that explains FEWER of the onsets
+/// must not out-score one that explains all of them.
+///
+/// Why multiply (not an eligibility gate) and why it passes BOTH folding tests:
+/// - `eighth_note_content_folds_to_base_tempo` (273ms eighths, true 110 BPM): the
+///   histogram's in-range pick is the 546ms quarter (110 BPM); its ½× (1091ms,
+///   55 BPM) and 2× (273ms, 220 BPM) octaves both fall OUTSIDE [min_bpm, max_bpm]
+///   and are skipped, so only the correct 1× competes — coverage weighting is a
+///   no-op here and 110 BPM stands. (The brief's worry that offbeat eighths give
+///   the 1× grid coverage ~0.5 is moot: with no in-range rival, scaling the sole
+///   candidate can't change the winner.)
+/// - `sparse_quarter_notes_do_not_fold_to_half_time` (test-pattern onsets): the
+///   ½× 60 BPM grid (coverage 0.5) is multiplied down below the 121 BPM grid
+///   (coverage 1.0), so it no longer wins. An eligibility gate keyed to the 1×
+///   pick would fix THIS case but NOT the 8bar case above (there the low-coverage
+///   candidate IS the 1× baseline); multiplying every candidate by its own
+///   coverage handles both symmetrically.
+///
+/// # Deferred (spec §4.2)
+/// The spec also asks to "prefer the candidate in the theme's stated BPM range
+/// when scores are close." That is not implementable here: `estimate_tempo`'s
+/// signature is fixed and carries no theme, so `fold_octave` has no access to a
+/// theme's BPM range. Theme-aware preference would require plumbing the theme
+/// into `estimate_tempo`; until then the generic ×1.05 prior for the histogram's
+/// own 1× pick stands in for that tie-breaking bias. Tracked for a later task.
 fn fold_octave(onsets: &[Onset], interval_ms: f64, config: &TempoConfig) -> f64 {
     if onsets.is_empty() || interval_ms <= 0.0 {
         return interval_ms;
@@ -312,11 +383,13 @@ fn fold_octave(onsets: &[Onset], interval_ms: f64, config: &TempoConfig) -> f64 
         if bpm < config.min_bpm || bpm > config.max_bpm {
             continue;
         }
-        // Normalize: per-beat average so long intervals aren't penalized for
-        // having fewer beats to align.
+        // Per-beat average so long intervals aren't penalized for having fewer
+        // beats to align, then weighted by coverage so a grid that leaves onsets
+        // unexplained can't win on that average alone (the half-time guard).
         let raw = best_phase_score(onsets, cand, last);
         let beats = (last / cand).max(1.0);
-        let mut score = raw / beats;
+        let coverage = onset_coverage(onsets, cand);
+        let mut score = (raw / beats) * coverage;
         if (cand - interval_ms).abs() < f64::EPSILON {
             score *= 1.05; // mild prior for the histogram's own pick
         }
@@ -491,6 +564,38 @@ mod tests {
         let est = estimate_tempo(&onsets, 44100);
         assert!((est.bpm - 80.0).abs() < 4.0, "got {}", est.bpm);
     }
+
+    #[test]
+    fn sparse_quarter_notes_do_not_fold_to_half_time() {
+        // Mirrors test-pattern.wav's ACTUAL detected onsets (0/476/975/1474ms —
+        // real detector jitter around a true ≈120 BPM 500ms grid). Perfectly-even
+        // 500ms×4 does NOT reproduce the bug (the ×1.05 1× prior tips the tie), so
+        // we use the real, slightly-jittered timings the detector emits.
+        //
+        // The half-time (½×) candidate at ~61 BPM (~983ms beats) lands one beat on
+        // roughly every OTHER onset, so its per-beat *alignment average* is ~1.0 —
+        // and with only ~3 beats of material the correct ~122 BPM candidate is
+        // dragged down by the beats that fall in the gaps between the sparse onsets.
+        // Per-beat scoring alone therefore folds this to ~61 BPM. The onset-COVERAGE
+        // guard fixes it: at 122 BPM all 4 onsets sit on a beat (coverage 1.0); at
+        // 61 BPM only ~2 of 4 do (coverage ~0.5), so the slower candidate — which
+        // explains FEWER of the onsets — is no longer eligible to out-score the one
+        // that explains all of them.
+        let onsets: Vec<Onset> = [0.0, 476.0, 975.2, 1474.5]
+            .iter()
+            .map(|&t| Onset {
+                timestamp_ms: t,
+                strength: 1.0,
+            })
+            .collect();
+        let est = estimate_tempo(&onsets, 44100);
+        assert!(
+            (est.bpm - 120.0).abs() < 8.0,
+            "got {} (was ~61.0 = half-time fold before the coverage guard)",
+            est.bpm
+        );
+    }
+
 
     #[test]
     fn confidence_is_not_cosmetic() {
