@@ -22,6 +22,14 @@ NOT a verdict on the WASM detector itself. See "What this does and does not
 prove" below — the compute path is fast (P95 18.5ms); the acoustic round trip
 of the built-in hardware is the wall.
 
+> **Numbers below are the SPIKE's, measured with an RMS-stub detector.** The
+> shipping detector was re-measured in Task 6 (final section of this doc): the
+> real `StreamingDetector` defers each onset ~100ms by design, so the final
+> synthetic floor is ~112ms P95 and the final loopback is ~165ms P95. The NO-GO
+> only hardens — the detector alone now exceeds the 60ms budget before any
+> acoustic path. Read the **Task 6 re-measure** section at the bottom for the
+> final, shipping numbers.
+
 ---
 
 ## Methodology
@@ -338,3 +346,93 @@ loading + event-emission path was re-verified end-to-end in a real browser
 `event` (classId 0 / conf 1.0) for a synthetic kick routed through the graph.
 The GATE DECISION (VISUAL JAM) is unaffected — it is an acoustic-hardware
 verdict, not a detector-compute one.
+
+---
+
+## Phase 3 Task 6 re-measure — the FINAL detector, on the FINAL build (2026-07-14)
+
+The Task 3 "re-measure status" note above is now discharged. The harness was
+re-run against the **shipping** production build (the real `StreamingDetector`
+in WASM, 110KB gz — Task 5's kNN calibration grew it from the Task 3 89KB), on
+the **same machine** (Apple Silicon MacBook Pro, built-in mic + speakers), with
+the same methodology (headed Chromium, real devices, no fake-media flags in
+loopback). 3 runs each, `REPS = 20`.
+
+### Synthetic compute + deferral floor (NOT the gate) — 3 runs
+
+| Run | hits | detector P50 | detector P95 |
+|-----|------|--------------|--------------|
+| 1   | 20/20 | 99.6ms      | 112.3ms      |
+| 2   | 20/20 | 100.0ms     | 108.5ms      |
+| 3   | 20/20 | 104.7ms     | 115.9ms      |
+
+**Aggregate synthetic: P50 ≈ 100-105ms, P95 ≈ 108-116ms.**
+
+### Acoustic loopback (THE GATE NUMBER) — 3 runs, built-in mic + speakers
+
+| Run | hits | misses | detector P50 | detector P95 | mouth-to-sound P50 | mouth-to-sound P95 |
+|-----|------|--------|--------------|--------------|--------------------|--------------------|
+| 1   | 20/20 | 0     | 122.6ms      | 163.7ms      | 122.6ms            | 163.7ms            |
+| 2   | 20/20 | 0     | 162.0ms      | 165.5ms      | 162.0ms            | 165.5ms            |
+| 3   | 20/20 | 0     | 109.3ms      | 165.2ms      | 109.3ms            | 165.2ms            |
+
+**Aggregate loopback: P50 ≈ 109-162ms, P95 ≈ 164-166ms.**
+
+### The load-bearing finding: the detector's own deferral is now the floor
+
+The spike's RMS-stub synthetic floor was **P95 18.5ms** — the compute path was
+negligible and the ~100ms loopback number was **pure hardware round trip**. That
+is no longer the shape of the problem. The real `StreamingDetector` does not fire
+on the transient edge; it **defers each confirmed onset by
+`feature_window_ms = 100ms`** (`crates/beatrice-dsp/src/streaming.rs`) so its
+classification window fills with the same post-onset audio the offline pipeline
+sees — that deferral is what makes streaming classification match offline within
+±20ms (`tests/streaming_tolerance.rs`). The consequence for latency: the
+detector emits ~100ms *after* the onset by design, so:
+
+- **Synthetic P95 climbed 18.5ms → ~112ms.** This is not FFT cost — a 512-point
+  STFT per 256-sample hop is cheap. It is the 100ms classification-window
+  deferral plus one hop of peak confirmation. The compute itself is still sub-ms
+  per quantum; the *algorithm* waits 100ms on purpose.
+- **Loopback P95 climbed ~103ms → ~165ms.** The ~100ms detector deferral now
+  **stacks on top of** the ~60ms acoustic round trip measured in the spike.
+
+**What this changes about the GATE: nothing — it deepens it.** The spike's NO-GO
+rested on acoustic hardware (~100ms round trip > 60ms). The final detector adds
+its own ~100ms algorithmic deferral, so **the detector alone (synthetic, no
+speakers, no mic) already exceeds the 60ms budget by ~1.9x**, before any acoustic
+path. Full sample-tight live synth is even more firmly off the table than the
+spike concluded. The VISUAL-JAM decision is not just correct, it is now
+over-determined: it fails the budget on compute-plus-deferral alone.
+
+This is the honest form of the number. A future full-jam attempt would need a
+*different* detector (a low-latency edge-triggered classifier that does not wait
+100ms to classify), not merely better hardware — a strictly larger scope than
+the spike's "external audio interface might close the gap" note.
+
+### Calibrated (kNN) row — measured-by-reasoning, not harness
+
+The brief asks for a CALIBRATED row (a kNN profile active, so `push()` does more
+per confirmed onset). It is **not** added as a separate harness run, honestly
+because it is not measurable-apart at this resolution: kNN classification is
+`O(samples)` over a *tiny* fixed set — at most `MIN_SAMPLES_PER_CLASS (5) × 4
+classes = 20` stored samples, each a 7-float squared-distance
+(`KnnClassifier::classify`, `crates/beatrice-dsp/src/events/calibration.rs`),
+run **once per confirmed onset** (not per quantum). That is on the order of a few
+hundred float multiplies per onset — nanoseconds — against a 100ms deferral and a
+per-quantum FFT. It lives entirely inside the same `feature_window_ms` deferral
+window (classification happens when the window fills, whether heuristic or kNN),
+so it adds **zero** to the emission latency the harness measures. The `/jam-spike`
+route also runs no calibration profile, so a "calibrated" harness run would
+report the same synthetic floor within run-to-run noise. Row skipped on that
+basis, stated plainly rather than faked.
+
+### Reproduce (unchanged recipe)
+
+```bash
+npm run build
+npx vite preview --port 1420 --strictPort &
+osascript -e "get volume settings"   # confirm output NOT muted, volume up
+node scripts/measure-latency.mjs              # acoustic loopback (gate number)
+node scripts/measure-latency.mjs --synthetic  # compute + deferral floor
+```

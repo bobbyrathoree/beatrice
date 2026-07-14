@@ -151,10 +151,81 @@ When you hit Play, Beatrice doesn't just loop your beat — it builds a full 16-
 
 A 4-second beatbox becomes a 30-second evolving track.
 
+## Jam Mode
+
+Jam Mode is a **sketch instrument**: press START and beatbox live while Beatrice
+listens. Each sound you make flashes as a class-colored tile the instant it's
+detected, driving a live waveform — you **see the band form as you jam**. When
+you've got something, hit **CAPTURE** and the last few seconds are handed to the
+full offline pipeline, which arranges them into a playable, exportable track.
+
+### Honest latency — the gate we set and the gate we failed
+
+We held Jam Mode to a hard rule up front: **acoustic mouth-to-sound P95 ≤ 60ms**
+would earn *full live synth* (hear the synth react under your voice in real
+time); anything slower would ship as *visual jam* instead. We then measured it
+on real hardware — most projects never publish this number at all.
+
+**Outcome: NO-GO for live synth. Jam Mode ships in visual form.** On this
+machine's built-in mic + speakers the shipping detector measures **P95 ≈ 165ms
+mouth-to-sound** (P50 ≈ 109-162ms) — ~2.7x over the 60ms budget. Two things
+stack to make that number:
+
+- **~60ms** is the acoustic round trip of commodity built-in laptop audio (DAC
+  out → speaker → air → mic → ADC in → input buffer). Not something software can
+  move.
+- **~100ms** is the detector's *own* design: the streaming classifier defers
+  each onset by a 100ms window so its live classification matches the offline
+  pipeline within ±20ms. The compute itself is sub-millisecond; the wait is
+  deliberate.
+
+So live synth would feel like beatboxing over a ~165ms echo — unplayable. The
+honest form is **visual**: instant flashes and capture, no fake "live" synth
+that lags. Full numbers, methodology, and the 3-run re-measure are in
+[docs/latency.md](docs/latency.md).
+
+> The detector floor alone (measured synthetically, no speakers or mic) is
+> already ~112ms P95 — it exceeds the 60ms budget before any acoustic path. A
+> future full-jam build needs a *different*, edge-triggered detector, not just
+> better hardware. That's documented, not hand-waved.
+
+### The flow: calibrate → jam → capture → export
+
+1. **Calibrate (optional, ~20s).** Hit TEACH and make each of your 4 sounds 5×.
+   Beatrice builds a per-voice kNN profile so *your* "tss" reads as a hi-hat even
+   if the generic heuristic disagrees. A HEURISTIC/YOURS toggle flips
+   classification live — you **see** subsequent tiles change color as your
+   profile takes over. The profile persists across sessions (localStorage; also
+   registered with the native backend so the offline pipeline uses it too).
+2. **Jam (~30s).** Beatbox. Sounds flash as they're detected.
+3. **Capture.** The last few seconds of mic audio are encoded to WAV.
+4. **Arrange.** That WAV runs through the exact same pipeline as an upload —
+   detection, classification, tempo, grid, harmonic arrangement, Song Mode.
+5. **Export** the result as MIDI or WAV, same as any other track.
+
+### Real vs. mock — what actually runs where
+
+Be precise about this, because Beatrice has a browser demo with a mock backend:
+
+- **Jam detection is genuinely in-browser and real, everywhere.** The live
+  detector is the actual Rust `StreamingDetector` compiled to WASM (~110KB
+  gzipped), running on the audio render thread in an AudioWorklet. In the browser
+  demo it's the *same* WASM — the mock's fake DSP is **not** in the jam path.
+  What flashes on screen is a real spectral-flux onset detector classifying your
+  real microphone audio.
+- **The offline arrangement pipeline is still mocked in the browser demo.** When
+  you CAPTURE in the browser demo, the resulting WAV is analyzed by the mock
+  (which fabricates events from byte length), so the arrangement is illustrative,
+  not a real analysis of what you played. **In the native app**, CAPTURE runs the
+  real Rust pipeline end-to-end, so the arrangement reflects your actual beat.
+
+There's a step-by-step walkthrough in [docs/demo-script.md](docs/demo-script.md).
+
 ## Tech Stack
 
 - **Frontend**: React 19, TypeScript, Zustand, Three.js (R3F), Framer Motion, Vite 7
 - **Backend**: Rust (Tauri 2), SQLite (rusqlite), hound (WAV), cpal (recording), realfft (FFT), midly (MIDI), fundsp (DSP)
+- **Live jam**: the `beatrice-dsp` crate compiled to WASM (`wasm-pack`), running the causal `StreamingDetector` inside a WebAudio AudioWorklet — the same Rust DSP as the CLI and native backend
 - **Audio**: WebAudio API with layered synthesis, convolution reverb, ping-pong delay, sidechain ducking
 - **Design**: Neo-brutalist CSS with bold borders and high-contrast colors
 

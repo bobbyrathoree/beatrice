@@ -68,22 +68,33 @@ export function ExportControls({
         })
       );
 
-      // Prompt user for save location
-      const filePath = await save({
-        defaultPath: `beatrice_${themeName}_${Date.now()}.mid`,
-        filters: [{
-          name: 'MIDI File',
-          extensions: ['mid', 'midi'],
-        }],
-      });
+      if (isTauriAvailable()) {
+        // Native: prompt for a save location and write the file to disk.
+        const filePath = await save({
+          defaultPath: `beatrice_${themeName}_${Date.now()}.mid`,
+          filters: [{
+            name: 'MIDI File',
+            extensions: ['mid', 'midi'],
+          }],
+        });
 
-      if (!filePath) {
-        setMidiStatus('idle');
-        return;
+        if (!filePath) {
+          setMidiStatus('idle');
+          return;
+        }
+
+        await writeFile(filePath, new Uint8Array(midiBytes));
+      } else {
+        // Browser/demo: trigger a Blob download (the plugin-dialog/fs commands are
+        // not available outside Tauri). Mirrors the WAV export fallback below.
+        const blob = new Blob([new Uint8Array(midiBytes)], { type: 'audio/midi' });
+        const a = Object.assign(document.createElement('a'), {
+          href: URL.createObjectURL(blob),
+          download: `beatrice_${themeName}.mid`,
+        });
+        a.click();
+        URL.revokeObjectURL(a.href);
       }
-
-      // Write file
-      await writeFile(filePath, new Uint8Array(midiBytes));
 
       setMidiStatus('success');
       setTimeout(() => setMidiStatus('idle'), 3000);
