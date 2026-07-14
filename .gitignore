@@ -44,3 +44,7 @@ test-audio/
 
 # Claude Code
 CLAUDE.md
+
+# Rust build outputs (Cargo workspace uses a single root target/ dir)
+/target/
+crates/*/target/

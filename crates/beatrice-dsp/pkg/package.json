@@ -1,0 +1,15 @@
+{
+  "name": "beatrice-dsp",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "beatrice_dsp_bg.wasm",
+    "beatrice_dsp.js",
+    "beatrice_dsp.d.ts"
+  ],
+  "main": "beatrice_dsp.js",
+  "types": "beatrice_dsp.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

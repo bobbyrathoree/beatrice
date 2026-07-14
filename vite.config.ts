@@ -9,6 +9,9 @@ const isTauri = !!process.env.TAURI_ENV_PLATFORM;
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
+  // Phase 3 SPIKE: the AudioWorklet loads its WASM by fetching the .wasm as a
+  // bundled asset URL (new URL(..., import.meta.url)); treat .wasm as an asset.
+  assetsInclude: ["**/*.wasm"],
   resolve: {
     alias: isTauri
       ? {}
