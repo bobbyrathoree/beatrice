@@ -1,15 +1,31 @@
 // detector.worklet.ts — an ES-module AudioWorklet that runs the WASM detector
 // on the audio render thread.
 //
-// OUTBOUND MESSAGES: the detector is the causal StreamingDetector (P3 Task 3),
-// which classifies as well as detects. Per confirmed onset we post
-//   { type: "event", t, tMs, classId, conf }
-// where `t` is the shared worklet clock (seconds) for scheduling, `tMs` is the
-// onset's estimated time relative to stream start, `classId` is the EventClass
-// (0=kick, 1=hihat, 2=snare/click, 3=hum), and `conf` is the confidence. The
-// WASM `push` returns these as a flat Float32Array of triples — JSON-free, no
-// serde on the render thread. (Earlier spike revision posted `{type:"hit"}`
-// from a bare RMS SpikeDetector; consumers now key on "event".)
+// ============================ MESSAGE ABI ============================
+//
+// OUTBOUND (worklet -> main):
+//   { type: "ready" }                                   after WASM init
+//   { type: "event", t, tMs, classId, conf, features }  per confirmed onset
+//     - t        : shared worklet clock (seconds) for scheduling
+//     - tMs      : onset's estimated time relative to STREAM START
+//     - classId  : EventClass id (0=kick, 1=hihat, 2=snare/click, 3=hum)
+//     - conf     : classification confidence [0,1]
+//     - features : [centroid, zcr, low, mid, high, peak, crest] — the 7-float
+//                  EventFeatures vector, forwarded so the calibration panel can
+//                  echo a detected event straight back as a labeled sample
+//                  ({type:"calibrate"}) without re-deriving features.
+//
+// INBOUND (main -> worklet):
+//   { type: "wasm", bytes }              compile+instantiate the detector
+//   { type: "calibrate", classId, features }
+//                                        add a labeled few-shot sample (Task 5)
+//   { type: "setCalibration", enabled }  flip the HEURISTIC/YOURS A/B toggle
+//
+// WASM push() ABI: a flat Float32Array of EVENT_STRIDE (10) floats per event —
+//   [tMs, classId, conf, centroid, zcr, low, mid, high, peak, crest]
+// JSON-free, no serde on the render thread. Empty means "no event this quantum".
+// EVENT_STRIDE and the feature order MUST match crates/beatrice-dsp/src/lib.rs
+// (WASM_EVENT_STRIDE + WasmDetector::push); bump both in lockstep.
 //
 // THE ONE VERIFIED WASM-IN-WORKLET LOADING PATH (wasm-pack `web` target):
 //   1. wasm-pack `web` glue is a plain ES module. AudioWorklet modules ARE ES
@@ -32,11 +48,23 @@
 import "./textcodec-polyfill";
 import { initSync, WasmDetector } from "../../crates/beatrice-dsp/pkg/beatrice_dsp";
 
+/** Floats per event record in the push() ABI (see crate WASM_EVENT_STRIDE). */
+const EVENT_STRIDE = 10;
+
 interface WasmMessage {
   type: "wasm";
   bytes: ArrayBuffer;
 }
-type InboundMessage = WasmMessage;
+interface CalibrateMessage {
+  type: "calibrate";
+  classId: number;
+  features: number[] | Float32Array;
+}
+interface SetCalibrationMessage {
+  type: "setCalibration";
+  enabled: boolean;
+}
+type InboundMessage = WasmMessage | CalibrateMessage | SetCalibrationMessage;
 
 class DetectorProcessor extends AudioWorkletProcessor {
   private det: WasmDetector | null = null;
@@ -44,12 +72,24 @@ class DetectorProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.port.onmessage = (e: MessageEvent<InboundMessage>) => {
-      if (e.data.type === "wasm") {
+      const msg = e.data;
+      if (msg.type === "wasm") {
         // Synchronous compile from the posted bytes. Passing a WebAssembly.Module
         // avoids any async instantiate on the audio thread.
-        initSync({ module: new WebAssembly.Module(e.data.bytes) });
+        initSync({ module: new WebAssembly.Module(msg.bytes) });
         this.det = new WasmDetector(sampleRate);
         this.port.postMessage({ type: "ready" });
+      } else if (msg.type === "calibrate") {
+        // Few-shot: add a labeled sample to the live profile (Task 5).
+        this.det?.add_calibration_sample(
+          msg.classId >>> 0,
+          msg.features instanceof Float32Array
+            ? msg.features
+            : new Float32Array(msg.features)
+        );
+      } else if (msg.type === "setCalibration") {
+        // A/B toggle: kNN-first (personal) vs heuristic-only.
+        this.det?.set_calibration_enabled(!!msg.enabled);
       }
     };
   }
@@ -58,21 +98,29 @@ class DetectorProcessor extends AudioWorkletProcessor {
     const ch = inputs[0]?.[0];
     if (!ch || !this.det) return true;
 
-    // The WASM StreamingDetector returns a flat Float32Array of
-    // [t_ms, classId, confidence] triples — one per confirmed onset this
-    // quantum (usually empty). JSON-free by design: no serde on the render
-    // thread. `t_ms` is the onset's estimated time relative to STREAM START;
-    // `currentTime` is the shared worklet/AudioContext clock (seconds) callers
-    // use for scheduling. We forward both so the harness keeps measuring the
-    // detect delta while live consumers get the class + confidence.
-    const triples = this.det.push(ch);
-    for (let i = 0; i + 2 < triples.length; i += 3) {
+    // The WASM StreamingDetector returns a flat Float32Array of EVENT_STRIDE-
+    // float records — one per confirmed onset this quantum (usually empty).
+    // JSON-free by design: no serde on the render thread. `tMs` is the onset's
+    // estimated time relative to STREAM START; `currentTime` is the shared
+    // worklet/AudioContext clock (seconds) callers use for scheduling. We
+    // forward both plus the feature vector (for calibration echo-back).
+    const recs = this.det.push(ch);
+    for (let i = 0; i + EVENT_STRIDE - 1 < recs.length; i += EVENT_STRIDE) {
       this.port.postMessage({
         type: "event",
         t: currentTime,
-        tMs: triples[i],
-        classId: triples[i + 1],
-        conf: triples[i + 2],
+        tMs: recs[i],
+        classId: recs[i + 1],
+        conf: recs[i + 2],
+        features: [
+          recs[i + 3],
+          recs[i + 4],
+          recs[i + 5],
+          recs[i + 6],
+          recs[i + 7],
+          recs[i + 8],
+          recs[i + 9],
+        ],
       });
     }
     return true;

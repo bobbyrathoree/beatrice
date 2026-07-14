@@ -14,6 +14,7 @@ import { EVENT_CLASS_COLORS, EVENT_CLASS_NAMES } from "../../types/explainabilit
 import { useJamSession } from "../../hooks/useJamSession";
 // Single source of truth for classId -> EventClass (shared with the JamBuffer).
 import { JAM_CLASS_TO_EVENT_CLASS } from "../../hooks/jamBuffer";
+import { CalibrationPanel } from "./CalibrationPanel";
 import type { Project } from "../../store/useStore";
 
 interface JamScreenProps {
@@ -23,9 +24,23 @@ interface JamScreenProps {
 }
 
 export function JamScreen({ onProjectCreated, onError, onExit }: JamScreenProps) {
-  const { isRunning, error, liveEvents, eventCount, level, analyser, start, stop, capture } =
-    useJamSession();
+  const {
+    isRunning,
+    error,
+    liveEvents,
+    eventCount,
+    level,
+    analyser,
+    start,
+    stop,
+    capture,
+    addCalibrationSample,
+    setCalibrationEnabled,
+  } = useJamSession();
   const [isCapturing, setIsCapturing] = useState(false);
+  const [showCalibration, setShowCalibration] = useState(false);
+  // The most recent live event drives the CalibrationPanel's sample capture.
+  const latestEvent = liveEvents.length > 0 ? liveEvents[liveEvents.length - 1] : null;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | undefined>(undefined);
 
@@ -221,6 +236,18 @@ export function JamScreen({ onProjectCreated, onError, onExit }: JamScreenProps)
         events: <span data-testid="jam-event-count">{eventCount}</span>
       </div>
 
+      {/* Few-shot calibration panel (Task 5). Opens over the flash tiles; the
+          A/B toggle re-classifies subsequent events, changing tile colors. */}
+      {showCalibration && (
+        <CalibrationPanel
+          latestEvent={latestEvent}
+          isRunning={isRunning}
+          onSample={addCalibrationSample}
+          onToggle={setCalibrationEnabled}
+          onClose={() => setShowCalibration(false)}
+        />
+      )}
+
       {/* Controls */}
       <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", justifyContent: "center" }}>
         {!isRunning ? (
@@ -243,6 +270,17 @@ export function JamScreen({ onProjectCreated, onError, onExit }: JamScreenProps)
             whileTap={{ scale: 0.97 }}
           >
             {isCapturing ? "◆ CAPTURING…" : "◉ CAPTURE"}
+          </motion.button>
+        )}
+        {isRunning && (
+          <motion.button
+            className="btn btn-large"
+            data-testid="jam-teach"
+            onClick={() => setShowCalibration((v) => !v)}
+            whileHover={{ scale: 1.03, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+          >
+            {showCalibration ? "▼ TEACH" : "✎ TEACH"}
           </motion.button>
         )}
         <motion.button

@@ -48,7 +48,7 @@ use std::collections::VecDeque;
 
 use crate::events::calibration::KnnClassifier;
 use crate::events::types::{EventClass, EventFeatures};
-use crate::events::{CalibrationProfile, HeuristicClassifier};
+use crate::events::{CalibrationProfile, CalibrationSample, HeuristicClassifier};
 use crate::features::{apply_hann_window, compute_fft, extract_features};
 
 /// A classified event emitted by the streaming detector.
@@ -195,8 +195,17 @@ pub struct StreamingDetector {
     /// Confirmed-but-not-yet-classified onsets, in arrival order.
     pending: VecDeque<PendingOnset>,
 
-    /// Optional per-user kNN classifier (Task 5 path).
+    /// The accumulating user calibration profile (Task 5). Samples are added
+    /// live in jam mode; the source of truth for `knn`.
+    profile: CalibrationProfile,
+    /// Cached kNN classifier, rebuilt from `profile` whenever samples change.
+    /// `Some` only once the profile is sufficient (≥5 samples for all 4
+    /// classes), so a half-taught profile never classifies.
     knn: Option<KnnClassifier>,
+    /// The A/B toggle. When `true` AND `knn` is `Some`, kNN classifies first
+    /// (heuristic fallback on a kNN no-verdict). When `false`, the heuristic
+    /// always wins — this is what the panel's HEURISTIC/YOURS switch flips.
+    calibration_enabled: bool,
     heuristic: HeuristicClassifier,
 }
 
@@ -238,18 +247,65 @@ impl StreamingDetector {
             last_onset_abs: None,
             leading_checked: false,
             pending: VecDeque::new(),
+            profile: CalibrationProfile::new("live".to_string()),
             knn: None,
+            calibration_enabled: false,
             heuristic: HeuristicClassifier::new(),
         }
     }
 
-    /// Create a detector that classifies with a user [`CalibrationProfile`]
-    /// (kNN), falling back to the heuristic when kNN has no verdict. This is the
-    /// Task 5 personalization path; unused by the default worklet wiring.
+    /// Create a detector seeded with a user [`CalibrationProfile`] and
+    /// calibration ENABLED. If the profile is already sufficient the detector is
+    /// kNN-first out of the gate (heuristic fallback on a kNN no-verdict); an
+    /// insufficient profile still falls through to the heuristic until enough
+    /// samples are added. This is the Task 5 personalization path — the worklet
+    /// loads a persisted profile this way on jam start.
     pub fn with_profile(sample_rate: u32, profile: CalibrationProfile) -> Self {
         let mut det = Self::new(sample_rate);
-        det.knn = Some(KnnClassifier::new(profile, 5));
+        det.profile = profile;
+        det.calibration_enabled = true;
+        det.rebuild_knn();
         det
+    }
+
+    /// The detector's sample rate (Hz).
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    /// Add a labeled calibration sample to the live profile (Task 5). Rebuilds
+    /// the kNN classifier; it starts classifying only once the profile becomes
+    /// sufficient ([`CalibrationProfile::is_sufficient`]).
+    pub fn add_calibration_sample(&mut self, sample: CalibrationSample) {
+        self.profile.add_sample(sample);
+        self.rebuild_knn();
+    }
+
+    /// Flip the A/B toggle. `true` = personal (kNN-first when sufficient),
+    /// `false` = heuristic-only. Cheap — does not touch the profile.
+    pub fn set_calibration_enabled(&mut self, enabled: bool) {
+        self.calibration_enabled = enabled;
+    }
+
+    /// Whether the accumulated profile has enough samples to classify with kNN.
+    pub fn is_calibration_sufficient(&self) -> bool {
+        self.profile.is_sufficient()
+    }
+
+    /// Snapshot of the live calibration profile (for persistence).
+    pub fn calibration_profile(&self) -> &CalibrationProfile {
+        &self.profile
+    }
+
+    /// Rebuild the cached kNN classifier from the current profile. `knn` is
+    /// `Some` only when the profile is sufficient, so an under-taught profile
+    /// never overrides the heuristic even with calibration enabled.
+    fn rebuild_knn(&mut self) {
+        self.knn = if self.profile.is_sufficient() {
+            Some(KnnClassifier::new(self.profile.clone(), 5))
+        } else {
+            None
+        };
     }
 
     /// Feed a chunk of mono samples (any length). Returns the events whose
@@ -462,12 +518,19 @@ impl StreamingDetector {
         }
     }
 
-    /// Classify features via the kNN profile if present (falling back to the
-    /// heuristic on a no-verdict), else the heuristic.
-    fn classify(&self, f: &EventFeatures) -> (EventClass, f32) {
-        if let Some(knn) = &self.knn {
-            if let Some((class, conf)) = knn.classify(f) {
-                return (class, conf);
+    /// Classify features. kNN-first when calibration is enabled AND the profile
+    /// is sufficient (`knn` is `Some`), falling back to the heuristic on a kNN
+    /// no-verdict; the heuristic otherwise. This gate is what the A/B toggle
+    /// flips: [`set_calibration_enabled`](Self::set_calibration_enabled).
+    ///
+    /// Public so the worklet's calibration UI can re-classify a probe/event
+    /// through the live gate without re-running detection.
+    pub fn classify(&self, f: &EventFeatures) -> (EventClass, f32) {
+        if self.calibration_enabled {
+            if let Some(knn) = &self.knn {
+                if let Some((class, conf)) = knn.classify(f) {
+                    return (class, conf);
+                }
             }
         }
         let r = self.heuristic.classify(f);
@@ -572,6 +635,118 @@ mod tests {
         let events = det.push(&audio); // one push, window long-since full
         assert_eq!(events.len(), 1, "one-shot push lost the onset");
         assert_eq!(events[0].class, EventClass::BilabialPlosive);
+    }
+
+    // ---- Task 5: few-shot calibration (kNN-first + heuristic fallback) ----
+
+    use crate::events::CalibrationSample;
+
+    /// A hihat-like feature vector. The heuristic classifies this HihatNoise
+    /// (high centroid, high ZCR, high-band dominant).
+    fn hihat_like() -> EventFeatures {
+        EventFeatures {
+            spectral_centroid: 4500.0,
+            zcr: 0.45,
+            low_band_energy: 0.05,
+            mid_band_energy: 0.25,
+            high_band_energy: 0.70,
+            peak_amplitude: 0.6,
+            crest_factor: 3.0,
+        }
+    }
+
+    fn kick_like() -> EventFeatures {
+        EventFeatures {
+            spectral_centroid: 300.0,
+            zcr: 0.05,
+            low_band_energy: 0.70,
+            mid_band_energy: 0.20,
+            high_band_energy: 0.10,
+            peak_amplitude: 0.8,
+            crest_factor: 4.0,
+        }
+    }
+
+    fn hum_like() -> EventFeatures {
+        EventFeatures {
+            spectral_centroid: 600.0,
+            zcr: 0.05,
+            low_band_energy: 0.30,
+            mid_band_energy: 0.45,
+            high_band_energy: 0.25,
+            peak_amplitude: 0.5,
+            crest_factor: 1.5,
+        }
+    }
+
+    /// A hihat-ish vector distinct enough from `hihat_like()` that a probe at
+    /// `hihat_like()` has its 5 nearest neighbours all in the class we teach it.
+    fn other_hat() -> EventFeatures {
+        EventFeatures {
+            spectral_centroid: 3200.0,
+            zcr: 0.35,
+            low_band_energy: 0.05,
+            mid_band_energy: 0.40,
+            high_band_energy: 0.55,
+            peak_amplitude: 0.5,
+            crest_factor: 3.0,
+        }
+    }
+
+    fn teach(det: &mut StreamingDetector, class: EventClass, f: EventFeatures) {
+        for _ in 0..5 {
+            det.add_calibration_sample(CalibrationSample::new(class, f.clone(), vec![], 44_100));
+        }
+    }
+
+    #[test]
+    fn detector_prefers_knn_after_sufficient_calibration() {
+        // Teach Beatrice — deliberately weird — that a hihat-like sound is a
+        // "Click" (the panel's "make your KICK sound as a TSS" scenario). Then
+        // the A/B toggle must flip the verdict on the SAME probe:
+        //   HEURISTIC (off) → HihatNoise (what the rules say)
+        //   YOURS     (on)  → Click       (what the user taught)
+        let mut det = StreamingDetector::new(44_100);
+
+        // Not sufficient yet → heuristic even when enabled.
+        det.set_calibration_enabled(true);
+        assert_eq!(det.classify(&hihat_like()).0, EventClass::HihatNoise);
+
+        teach(&mut det, EventClass::Click, hihat_like()); // the weird lesson
+        teach(&mut det, EventClass::BilabialPlosive, kick_like());
+        teach(&mut det, EventClass::HihatNoise, other_hat());
+        teach(&mut det, EventClass::HumVoiced, hum_like());
+
+        // Calibration OFF → heuristic verdict.
+        det.set_calibration_enabled(false);
+        assert_eq!(
+            det.classify(&hihat_like()).0,
+            EventClass::HihatNoise,
+            "with calibration off the heuristic should win"
+        );
+
+        // Calibration ON → the taught (kNN) verdict overrides the heuristic.
+        det.set_calibration_enabled(true);
+        assert_eq!(
+            det.classify(&hihat_like()).0,
+            EventClass::Click,
+            "with calibration on kNN should override the heuristic"
+        );
+    }
+
+    #[test]
+    fn with_profile_is_knn_first() {
+        // The brief's Step-1 shape: a pre-built sufficient profile makes the
+        // detector kNN-first out of the gate.
+        let mut profile = CalibrationProfile::new("test".into());
+        for _ in 0..5 {
+            profile.add_sample(CalibrationSample::new(EventClass::Click, hihat_like(), vec![], 44_100));
+            profile.add_sample(CalibrationSample::new(EventClass::BilabialPlosive, kick_like(), vec![], 44_100));
+            profile.add_sample(CalibrationSample::new(EventClass::HihatNoise, other_hat(), vec![], 44_100));
+            profile.add_sample(CalibrationSample::new(EventClass::HumVoiced, hum_like(), vec![], 44_100));
+        }
+        let det = StreamingDetector::with_profile(44_100, profile);
+        assert_eq!(det.classify(&hihat_like()).0, EventClass::Click);
     }
 
     #[test]

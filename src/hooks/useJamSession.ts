@@ -23,6 +23,7 @@ import { loadDetectorNode } from "../worklet/loadDetector";
 import { encodeWav16 } from "../audio/renderWav";
 import { JamBuffer } from "./jamBuffer";
 import { negotiateRecorderMimeType } from "./recorderMime";
+import { loadCalibrationSamples } from "./calibrationStore";
 
 /** EventClass id emitted by the WASM detector (0=kick,1=hihat,2=snare/click,3=hum). */
 export type JamClassId = 0 | 1 | 2 | 3;
@@ -33,10 +34,16 @@ export interface JamLiveEvent {
   key: number;
   /** onset time relative to stream start (ms) */
   tMs: number;
-  /** classified EventClass id */
+  /** classified EventClass id (post-toggle: reflects HEURISTIC or YOURS) */
   classId: JamClassId;
   /** classification confidence [0,1] */
   conf: number;
+  /**
+   * The event's 7-float EventFeatures vector
+   * ([centroid, zcr, low, mid, high, peak, crest]). Forwarded by the worklet so
+   * the calibration panel can echo a detected event back as a labeled sample.
+   */
+  features: number[];
 }
 
 export interface JamSession {
@@ -58,6 +65,13 @@ export interface JamSession {
   stop: () => Promise<void>;
   /** stop, return the last-N-seconds mic recording as WAV bytes */
   capture: () => Promise<Uint8Array>;
+  /**
+   * Teach the live detector one labeled sample (Task 5 few-shot calibration).
+   * `features` is the event's 7-float EventFeatures vector.
+   */
+  addCalibrationSample: (classId: JamClassId, features: number[]) => void;
+  /** Flip the HEURISTIC/YOURS A/B toggle on the live detector. */
+  setCalibrationEnabled: (enabled: boolean) => void;
 }
 
 /** How many seconds of the rolling mic recording capture() keeps. */
@@ -186,7 +200,10 @@ export function useJamSession(): JamSession {
       setAnalyser(an);
 
       // [GATE-FAIL] VISUAL JAM: on each detector event, flash + buffer only.
-      // The StreamingDetector posts { type: "event", t, tMs, classId, conf }.
+      // The StreamingDetector posts { type:"event", t, tMs, classId, conf, features }.
+      // The classId here already reflects the live A/B toggle (kNN when YOURS is
+      // on and the profile is sufficient, else heuristic) — so flipping the
+      // toggle visibly changes the tile colors/labels for subsequent events.
       node.port.onmessage = (e: MessageEvent) => {
         const data = e.data as {
           type: string;
@@ -194,20 +211,37 @@ export function useJamSession(): JamSession {
           tMs?: number;
           classId?: number;
           conf?: number;
+          features?: number[];
         };
         if (data.type !== "event") return;
         const tMs = data.tMs ?? 0;
         const classId = (data.classId ?? 0) as JamClassId;
         const conf = data.conf ?? 0;
+        const features = data.features ?? [];
 
         bufferRef.current.push({ t_ms: tMs, classId, conf });
         const key = keyRef.current++;
         setLiveEvents((prev) => {
-          const next = [...prev, { key, tMs, classId, conf }];
+          const next = [...prev, { key, tMs, classId, conf, features }];
           return next.length > LIVE_TAIL ? next.slice(-LIVE_TAIL) : next;
         });
         setEventCount((c) => c + 1);
       };
+
+      // Re-seed the detector with any persisted calibration so a returning user
+      // keeps their personalization. Samples cross the wasm boundary the same
+      // way live teaching does. Calibration stays OFF until the user flips the
+      // A/B toggle — re-seeding only makes YOURS available, it does not force it.
+      const persisted = loadCalibrationSamples();
+      if (persisted && persisted.length > 0) {
+        for (const s of persisted) {
+          node.port.postMessage({
+            type: "calibrate",
+            classId: s.classId,
+            features: s.features,
+          });
+        }
+      }
 
       // Mic -> detector (silent; connected to destination so process() is
       // pulled) and mic -> analyser. The worklet writes no output, so wiring it
@@ -286,6 +320,18 @@ export function useJamSession(): JamSession {
     return wav;
   }, [teardown]);
 
+  // --- Task 5: few-shot calibration control (main -> worklet) ---
+  const addCalibrationSample = useCallback(
+    (classId: JamClassId, features: number[]) => {
+      nodeRef.current?.port.postMessage({ type: "calibrate", classId, features });
+    },
+    []
+  );
+
+  const setCalibrationEnabled = useCallback((enabled: boolean) => {
+    nodeRef.current?.port.postMessage({ type: "setCalibration", enabled });
+  }, []);
+
   return {
     isRunning,
     error,
@@ -296,5 +342,7 @@ export function useJamSession(): JamSession {
     start,
     stop,
     capture,
+    addCalibrationSample,
+    setCalibrationEnabled,
   };
 }
