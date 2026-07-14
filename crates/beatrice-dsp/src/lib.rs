@@ -3,7 +3,8 @@
 //! This crate owns the deterministic "what" of Beatrice's analysis pipeline:
 //! audio ingest container ([`ingest::AudioData`]), spectral onset detection +
 //! feature extraction ([`features`]), event types and classification
-//! ([`events`]), and the streaming [`SpikeDetector`] used by the WASM worklet.
+//! ([`events`]), and the causal [`streaming::StreamingDetector`] driven by the
+//! WASM worklet.
 //! It is pure Rust with no Tauri dependency, so the identical code compiles for
 //! the native desktop app (`beatrice`, via `features = ["specta"]`) and for the
 //! browser AudioWorklet (`wasm-pack build --features wasm`).
@@ -15,6 +16,7 @@
 pub mod events;
 pub mod features;
 pub mod ingest;
+pub mod streaming;
 
 pub use events::{
     CalibrationProfile, CalibrationSample, ClassScore, ClassificationResult, ClassifierConfig,
@@ -22,6 +24,7 @@ pub use events::{
 };
 pub use features::{detect_onsets, extract_features, extract_features_for_window, Onset, OnsetConfig};
 pub use ingest::AudioData;
+pub use streaming::{LiveEvent, StreamingConfig, StreamingDetector};
 
 /// Run the offline heuristic analysis pipeline over decoded audio.
 ///
@@ -57,62 +60,59 @@ pub fn analyze_offline(audio: &AudioData, cfg: &OnsetConfig) -> Vec<Event> {
     events
 }
 
-/// RMS energy-threshold detector with a refractory window.
+/// Stable numeric id for an [`EventClass`], for the JSON-free WASM ABI.
 ///
-/// `push` is fed one render quantum (typically 128 samples) at a time and
-/// returns `true` on the block where a transient crosses the threshold, then
-/// stays silent for `refractory` samples afterwards. This is the streaming
-/// surface the AudioWorklet drives; the offline pipeline above is the batch
-/// counterpart.
-pub struct SpikeDetector {
-    #[allow(dead_code)]
-    sample_rate: u32,
-    refractory: u32,
-    since_last: u32,
-    threshold: f32,
-}
-
-impl SpikeDetector {
-    pub fn new(sample_rate: u32) -> Self {
-        Self {
-            sample_rate,
-            refractory: sample_rate / 10, // ~100ms
-            since_last: u32::MAX,
-            threshold: 0.08,
-        }
-    }
-
-    pub fn push(&mut self, samples: &[f32]) -> bool {
-        if samples.is_empty() {
-            return false;
-        }
-        let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
-        self.since_last = self.since_last.saturating_add(samples.len() as u32);
-        if rms > self.threshold && self.since_last > self.refractory {
-            self.since_last = 0;
-            return true;
-        }
-        false
+/// Matches the enum declaration order and the frontend `tauri-mock` convention
+/// (`0` = plosive/kick, `1` = hi-hat, `2` = click/snare, `3` = hum). The worklet
+/// maps these back to class names, so this ordering is part of the ABI contract
+/// — do not reorder without updating `detector.worklet.ts`.
+pub fn class_id(class: EventClass) -> f32 {
+    match class {
+        EventClass::BilabialPlosive => 0.0,
+        EventClass::HihatNoise => 1.0,
+        EventClass::Click => 2.0,
+        EventClass::HumVoiced => 3.0,
     }
 }
 
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
 
+/// WASM surface over the causal [`StreamingDetector`], driven by the
+/// AudioWorklet one render quantum at a time.
+///
+/// # ABI (JSON-free, no serde in the hot path)
+///
+/// [`push`](Self::push) returns a flat `Float32Array` of **3 floats per event**:
+/// `[t_ms, class_id, confidence, t_ms, class_id, confidence, ...]`. An empty
+/// array means "no event this quantum" (the common case). The length is always
+/// a multiple of 3. `class_id` is [`class_id`]'s mapping. The worklet reads the
+/// triples and posts one `{ type: "event", t, classId, conf }` message per event
+/// to the main thread. This avoids allocating/serializing JSON on the audio
+/// render thread.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
-pub struct WasmDetector(SpikeDetector);
+pub struct WasmDetector(StreamingDetector);
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 impl WasmDetector {
     #[wasm_bindgen(constructor)]
     pub fn new(sample_rate: u32) -> Self {
-        Self(SpikeDetector::new(sample_rate))
+        Self(StreamingDetector::new(sample_rate))
     }
 
-    pub fn push(&mut self, samples: &[f32]) -> bool {
-        self.0.push(samples)
+    /// Push one render quantum. Returns `[t_ms, class_id, confidence]` triples
+    /// (flat) for every event confirmed during this quantum; empty if none.
+    pub fn push(&mut self, samples: &[f32]) -> Vec<f32> {
+        let events = self.0.push(samples);
+        let mut out = Vec::with_capacity(events.len() * 3);
+        for e in events {
+            out.push(e.t_ms as f32);
+            out.push(class_id(e.class));
+            out.push(e.confidence);
+        }
+        out
     }
 }
 
@@ -121,36 +121,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn silence_never_fires() {
-        let mut det = SpikeDetector::new(48_000);
-        for _ in 0..100 {
-            assert!(!det.push(&[0.0f32; 128]));
-        }
-    }
-
-    #[test]
-    fn loud_block_fires_once_then_refractory() {
-        let mut det = SpikeDetector::new(48_000);
-        // refractory = 4800 samples ≈ 37.5 blocks of 128.
-        let loud = [0.5f32; 128];
-        // First loud block after startup (since_last starts at u32::MAX) fires.
-        assert!(det.push(&loud));
-        // Immediately after, we are inside the refractory window.
-        assert!(!det.push(&loud));
-        // Feed enough blocks to clear the refractory window (>4800 samples).
-        let mut fired_again = false;
-        for _ in 0..40 {
-            if det.push(&loud) {
-                fired_again = true;
-                break;
-            }
-        }
-        assert!(fired_again, "should fire again after refractory clears");
-    }
-
-    #[test]
-    fn empty_block_is_safe() {
-        let mut det = SpikeDetector::new(48_000);
-        assert!(!det.push(&[]));
+    fn class_ids_are_stable_and_distinct() {
+        // The worklet decodes these — guard the ABI ordering.
+        assert_eq!(class_id(EventClass::BilabialPlosive), 0.0);
+        assert_eq!(class_id(EventClass::HihatNoise), 1.0);
+        assert_eq!(class_id(EventClass::Click), 2.0);
+        assert_eq!(class_id(EventClass::HumVoiced), 3.0);
     }
 }

@@ -155,7 +155,10 @@ export default function JamSpike() {
 
         node.port.onmessage = (e: MessageEvent) => {
           const data = e.data as { type: string; t?: number };
-          if (data.type !== "hit") return;
+          // The StreamingDetector posts { type: "event", ... } per classified
+          // onset. The harness only cares about timing (detect delta), so it
+          // treats every event as a hit and ignores class/confidence.
+          if (data.type !== "event") return;
           if (mode === "loopback") {
             // React to a real transient with a kick (the jam behaviour).
             scheduleKick(ctx!, bus, ctx!.currentTime, 120);

@@ -13,9 +13,18 @@ import {
 } from "../audio/scheduleArrangement";
 import { loadDetectorNode } from "../worklet/loadDetector";
 
+/** EventClass id emitted by the WASM detector (see class_id in lib.rs). */
+export type JamClassId = 0 | 1 | 2 | 3;
+
 export interface JamHit {
   /** worklet `currentTime` (seconds) when the transient was detected */
   t: number;
+  /** onset's estimated time relative to stream start (ms) */
+  tMs?: number;
+  /** classified EventClass id (0=kick, 1=hihat, 2=snare/click, 3=hum) */
+  classId?: JamClassId;
+  /** classification confidence [0,1] */
+  conf?: number;
 }
 
 export interface JamSession {
@@ -59,12 +68,24 @@ export function useJamSession(): JamSession {
       const node = await loadDetectorNode(ctx);
       nodeRef.current = node;
 
-      // Route subsequent hits to a kick + optional caller callback.
+      // Route classified onsets to a kick + optional caller callback. The
+      // StreamingDetector posts { type: "event", t, tMs, classId, conf }.
       node.port.onmessage = (e: MessageEvent) => {
-        const data = e.data as { type: string; t?: number };
-        if (data.type === "hit") {
+        const data = e.data as {
+          type: string;
+          t?: number;
+          tMs?: number;
+          classId?: number;
+          conf?: number;
+        };
+        if (data.type === "event") {
           scheduleKick(ctx, bus, ctx.currentTime, 120);
-          onHit?.({ t: data.t ?? ctx.currentTime });
+          onHit?.({
+            t: data.t ?? ctx.currentTime,
+            tMs: data.tMs,
+            classId: data.classId as JamClassId | undefined,
+            conf: data.conf,
+          });
         }
       };
 

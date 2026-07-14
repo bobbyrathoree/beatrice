@@ -1,5 +1,19 @@
 /* @ts-self-types="./beatrice_dsp.d.ts" */
 
+/**
+ * WASM surface over the causal [`StreamingDetector`], driven by the
+ * AudioWorklet one render quantum at a time.
+ *
+ * # ABI (JSON-free, no serde in the hot path)
+ *
+ * [`push`](Self::push) returns a flat `Float32Array` of **3 floats per event**:
+ * `[t_ms, class_id, confidence, t_ms, class_id, confidence, ...]`. An empty
+ * array means "no event this quantum" (the common case). The length is always
+ * a multiple of 3. `class_id` is [`class_id`]'s mapping. The worklet reads the
+ * triples and posts one `{ type: "event", t, classId, conf }` message per event
+ * to the main thread. This avoids allocating/serializing JSON on the audio
+ * render thread.
+ */
 export class WasmDetector {
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
@@ -21,14 +35,18 @@ export class WasmDetector {
         return this;
     }
     /**
+     * Push one render quantum. Returns `[t_ms, class_id, confidence]` triples
+     * (flat) for every event confirmed during this quantum; empty if none.
      * @param {Float32Array} samples
-     * @returns {boolean}
+     * @returns {Float32Array}
      */
     push(samples) {
         const ptr0 = passArrayF32ToWasm0(samples, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.wasmdetector_push(this.__wbg_ptr, ptr0, len0);
-        return ret !== 0;
+        var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v2;
     }
 }
 if (Symbol.dispose) WasmDetector.prototype[Symbol.dispose] = WasmDetector.prototype.free;
@@ -57,6 +75,11 @@ function __wbg_get_imports() {
 const WasmDetectorFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmdetector_free(ptr, 1));
+
+function getArrayF32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
 
 let cachedFloat32ArrayMemory0 = null;
 function getFloat32ArrayMemory0() {

@@ -304,3 +304,37 @@ synthesis triggered by the user's mouth. The WASM detector + worklet toolchain
 proven here is still the foundation for the streaming visual detector in
 Task 2 — the port is worth doing; the ~100ms acoustic latency just rules out
 sample-tight live synth on built-in laptop audio.
+
+---
+
+## Phase 3 Task 3 update — real StreamingDetector replaces the RMS spike stub
+
+The worklet's WASM detector is now the causal `StreamingDetector`
+(`crates/beatrice-dsp/src/streaming.rs`): 512/256 STFT spectral flux with a
+rolling-2s mean+2σ adaptive threshold, a causal energy-rise kick fallback, and
+per-onset **classification** (heuristic; kNN-ready via `with_profile`). It
+replaces the bare `SpikeDetector` (RMS-threshold, boolean `push`).
+
+**ABI change.** `WasmDetector::push` now returns a flat `Float32Array` of
+`[t_ms, class_id, confidence]` triples (one per confirmed onset this quantum;
+empty when none) instead of a `bool`. No serde on the render thread. The worklet
+posts `{ type: "event", t, tMs, classId, conf }` per event (was
+`{ type: "hit", t }`). `class_id`: 0=kick, 1=hihat, 2=snare/click, 3=hum.
+
+**Bundle size.** Pulling the real FFT (`realfft`) into WASM grew the module from
+~7.3KB gz (RMS stub) to **~89KB gz** (235KB raw). This compiles **once** at
+session start (`initSync`), off the audio hot path, so it costs load time, not
+per-quantum latency. Acceptable for the visual-jam path; revisit only if
+first-paint jam latency becomes a concern.
+
+**Latency re-measure status.** The compute path is unchanged in SHAPE (one FFT
+per 256-sample hop vs the old per-quantum RMS), but the flux STFT is heavier
+than an RMS sum. The documented P50/P95 loopback numbers above were captured
+**headed, on real devices** (the harness explicitly forbids fake devices); a
+faithful re-measure requires the same headed real-device run and is left for the
+GATE re-confirmation when the visual-jam UI (Tasks 4–5) lands. The worklet
+loading + event-emission path was re-verified end-to-end in a real browser
+(Chromium): the module compiles, posts `ready`, and emits a correctly-classified
+`event` (classId 0 / conf 1.0) for a synthetic kick routed through the graph.
+The GATE DECISION (VISUAL JAM) is unaffected — it is an acoustic-hardware
+verdict, not a detector-compute one.

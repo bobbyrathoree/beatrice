@@ -143,8 +143,13 @@ fn calculate_spectral_features(
     (centroid, band_energies)
 }
 
-/// Apply Hann window function to reduce spectral leakage
-fn apply_hann_window(samples: &mut [f32]) {
+/// Apply Hann window function to reduce spectral leakage.
+///
+/// Exposed to the crate so the causal [`crate::streaming::StreamingDetector`]
+/// windows its STFT frames with the EXACT same taper as the offline flux path
+/// (spec §5.1: "same rectified-flux math as offline, causal"). Duplicating the
+/// window formula would risk silent drift between the two detectors.
+pub(crate) fn apply_hann_window(samples: &mut [f32]) {
     let n = samples.len();
 
     // Guard against empty or single-sample arrays
@@ -158,8 +163,11 @@ fn apply_hann_window(samples: &mut [f32]) {
     }
 }
 
-/// Compute real FFT and return magnitude spectrum
-fn compute_fft(samples: &[f32]) -> Vec<f32> {
+/// Compute real FFT and return magnitude spectrum.
+///
+/// Exposed to the crate so the streaming detector's per-frame flux uses the
+/// identical `realfft` magnitude spectrum as the offline path.
+pub(crate) fn compute_fft(samples: &[f32]) -> Vec<f32> {
     let mut planner = RealFftPlanner::<f32>::new();
     let fft = planner.plan_fft_forward(samples.len());
 

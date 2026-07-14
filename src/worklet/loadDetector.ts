@@ -10,8 +10,8 @@
 //   4. Worklet compiles synchronously (initSync) and posts { type: "ready" }.
 //
 // Returns the wired AudioWorkletNode once ready. The caller is responsible for
-// assigning `node.port.onmessage` to receive subsequent { type: "hit" } events
-// and for connecting a source into the node.
+// assigning `node.port.onmessage` to receive subsequent { type: "event" }
+// messages (t, tMs, classId, conf) and for connecting a source into the node.
 
 // SPIKE FINDING — the correct Vite recipe for AudioWorklet bundling.
 //
