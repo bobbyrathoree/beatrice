@@ -5,7 +5,6 @@ use std::env;
 use std::fs;
 
 use beatrice_lib::audio::{self, OnsetConfig};
-use beatrice_lib::events::{self, HeuristicClassifier};
 use beatrice_lib::groove::{self, Grid, GridDivision, GrooveFeel, QuantizeSettings, TimeSignature};
 use beatrice_lib::arranger::{self, ArrangementTemplate};
 
@@ -39,18 +38,14 @@ fn main() {
         return;
     }
 
-    let classifier = HeuristicClassifier::new();
-    let mut events = Vec::new();
+    // Shared offline detect→feature→classify loop (single home in beatrice-dsp).
+    let events = beatrice_dsp::analyze_offline(&audio, &config);
     println!("\n=== EVENTS ===");
-    for (i, onset) in onsets.iter().enumerate() {
-        let dur = if i + 1 < onsets.len() { onsets[i+1].timestamp_ms - onset.timestamp_ms } else { audio.duration_ms as f64 - onset.timestamp_ms };
-        let win = dur.clamp(50.0, 500.0);
-        let f = audio::extract_features_for_window(&audio, onset.timestamp_ms, win);
-        let r = classifier.classify(&f);
+    for (i, e) in events.iter().enumerate() {
+        let f = &e.features;
         println!("  [{:2}] {:8.1}ms {:20} {:.0}%  c={:.0} z={:.3} lo={:.2} mi={:.2} hi={:.2} pk={:.2} cr={:.1}",
-            i, onset.timestamp_ms, format!("{:?}", r.class), r.confidence*100.0,
+            i, e.timestamp_ms, format!("{:?}", e.class), e.confidence*100.0,
             f.spectral_centroid, f.zcr, f.low_band_energy, f.mid_band_energy, f.high_band_energy, f.peak_amplitude, f.crest_factor);
-        events.push(events::Event::new(onset.timestamp_ms, dur, r.class, r.confidence, f).with_scores(r.class_scores()));
     }
 
     let tempo = groove::estimate_tempo(&onsets, audio.sample_rate);

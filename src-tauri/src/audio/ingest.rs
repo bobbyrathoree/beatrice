@@ -1,9 +1,16 @@
 // Audio ingestion module
-// Reads WAV files, extracts metadata, and normalizes audio samples
+// Reads WAV files, extracts metadata, and normalizes audio samples.
+//
+// The `AudioData` container itself now lives in the `beatrice-dsp` crate (shared
+// with the WASM worklet); only WAV *decoding* (which needs `hound`) stays here.
 
 use hound::{WavReader, SampleFormat};
 use std::io::Cursor;
 use thiserror::Error;
+
+// Re-export the shared container so existing `crate::audio::AudioData` paths and
+// this module's `AudioData` references keep resolving unchanged.
+pub use beatrice_dsp::ingest::AudioData;
 
 #[derive(Debug, Error)]
 pub enum AudioError {
@@ -15,54 +22,6 @@ pub enum AudioError {
 
     #[error("Invalid audio data")]
     InvalidData,
-}
-
-#[derive(Debug, Clone)]
-pub struct AudioData {
-    /// Audio samples normalized to f32 in range [-1.0, 1.0]
-    pub samples: Vec<f32>,
-
-    /// Sample rate in Hz (e.g., 44100, 48000)
-    pub sample_rate: u32,
-
-    /// Number of channels (1 = mono, 2 = stereo)
-    pub channels: u16,
-
-    /// Bit depth of original audio (8, 16, 24, 32)
-    pub bit_depth: u16,
-
-    /// Duration in milliseconds
-    pub duration_ms: i64,
-
-    /// Total number of frames (samples / channels)
-    pub frame_count: usize,
-}
-
-impl AudioData {
-    /// Get duration in seconds as f64
-    pub fn duration_secs(&self) -> f64 {
-        self.duration_ms as f64 / 1000.0
-    }
-
-    /// Convert to mono by averaging channels
-    pub fn to_mono(&self) -> Vec<f32> {
-        if self.channels == 1 {
-            return self.samples.clone();
-        }
-
-        let mut mono = Vec::with_capacity(self.frame_count);
-        let channels = self.channels as usize;
-
-        for frame_idx in 0..self.frame_count {
-            let mut sum = 0.0;
-            for ch in 0..channels {
-                sum += self.samples[frame_idx * channels + ch];
-            }
-            mono.push(sum / channels as f32);
-        }
-
-        mono
-    }
 }
 
 /// Ingest a WAV file from raw bytes

@@ -4,7 +4,7 @@
 
 use realfft::RealFftPlanner;
 
-use crate::audio::AudioData;
+use crate::ingest::AudioData;
 use crate::events::types::EventFeatures;
 
 /// Onset detection result

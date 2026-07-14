@@ -155,6 +155,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 name = "beatrice"
 version = "0.1.0"
 dependencies = [
+ "beatrice-dsp",
  "chrono",
  "cpal",
  "csv",
@@ -163,7 +164,6 @@ dependencies = [
  "hound",
  "log",
  "midly",
- "realfft",
  "rusqlite",
  "serde",
  "serde_json",
@@ -186,6 +186,12 @@ dependencies = [
 name = "beatrice-dsp"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "realfft",
+ "serde",
+ "serde_json",
+ "specta",
+ "uuid",
  "wasm-bindgen",
 ]
 

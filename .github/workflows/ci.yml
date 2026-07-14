@@ -31,8 +31,12 @@ jobs:
       # the frontend built first on a fresh checkout.
       - run: npx vite build
       - run: node scripts/generate-test-audio.mjs
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      # --workspace so the extracted `beatrice-dsp` crate (incl. the offline golden
+      # freeze test) is built and tested alongside the native `beatrice` crate.
+      # The crate's `wasm` feature is off by default and pkg/ is committed, so no
+      # wasm32 target is needed here — this stays a host-target build.
+      - run: cargo test --workspace --manifest-path src-tauri/Cargo.toml
+      - run: cargo clippy --workspace --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: bindings freshness
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml export_bindings

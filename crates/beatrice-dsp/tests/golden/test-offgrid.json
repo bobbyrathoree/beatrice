@@ -1,0 +1,1025 @@
+[
+  {
+    "timestamp_ms": 267.0294784580499,
+    "duration_ms": 243.8095238095238,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11196.809,
+      "zcr": 0.10082783,
+      "low_band_energy": 0.043059878,
+      "mid_band_energy": 0.15096594,
+      "high_band_energy": 0.8059742,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 11.833674
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.39285716
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 510.8390022675737,
+    "duration_ms": 255.41950113378692,
+    "class": "Click",
+    "confidence": 0.8,
+    "features": {
+      "spectral_centroid": 2287.5637,
+      "zcr": 0.07404777,
+      "low_band_energy": 0.048469324,
+      "mid_band_energy": 0.84897053,
+      "high_band_energy": 0.102560095,
+      "peak_amplitude": 0.6279907,
+      "crest_factor": 11.552109
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.2857143
+      },
+      {
+        "class": "Click",
+        "score": 0.8
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.265
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 766.2585034013606,
+    "duration_ms": 267.02947845804977,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11215.542,
+      "zcr": 0.092067264,
+      "low_band_energy": 0.042447835,
+      "mid_band_energy": 0.15041676,
+      "high_band_energy": 0.8071354,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.383843
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 1033.2879818594104,
+    "duration_ms": 232.19954648526073,
+    "class": "BilabialPlosive",
+    "confidence": 1.0,
+    "features": {
+      "spectral_centroid": 89.995674,
+      "zcr": 0.0011721039,
+      "low_band_energy": 0.999994,
+      "mid_band_energy": 0.000006028519,
+      "high_band_energy": 1.1342473e-8,
+      "peak_amplitude": 0.8485718,
+      "crest_factor": 5.4684873
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 1.0
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.17142858
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.30499998
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 1265.487528344671,
+    "duration_ms": 243.80952380952385,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11234.736,
+      "zcr": 0.10082783,
+      "low_band_energy": 0.041754846,
+      "mid_band_energy": 0.14988026,
+      "high_band_energy": 0.8083649,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 11.833674
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.39285716
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 1509.297052154195,
+    "duration_ms": 255.41950113378698,
+    "class": "Click",
+    "confidence": 0.8,
+    "features": {
+      "spectral_centroid": 2282.9683,
+      "zcr": 0.07404777,
+      "low_band_energy": 0.05342947,
+      "mid_band_energy": 0.8445131,
+      "high_band_energy": 0.10205742,
+      "peak_amplitude": 0.6279907,
+      "crest_factor": 11.552109
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.2857143
+      },
+      {
+        "class": "Click",
+        "score": 0.8
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.265
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 1764.716553287982,
+    "duration_ms": 267.0294784580499,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11253.774,
+      "zcr": 0.092067264,
+      "low_band_energy": 0.04100125,
+      "mid_band_energy": 0.14937587,
+      "high_band_energy": 0.8096229,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.383843
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 2031.7460317460318,
+    "duration_ms": 232.19954648526073,
+    "class": "BilabialPlosive",
+    "confidence": 1.0,
+    "features": {
+      "spectral_centroid": 95.362045,
+      "zcr": 0.0011721039,
+      "low_band_energy": 0.99997973,
+      "mid_band_energy": 0.000020300773,
+      "high_band_energy": 3.7376285e-8,
+      "peak_amplitude": 0.8485718,
+      "crest_factor": 5.4684873
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 1.0
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.17142858
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.30499998
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 2263.9455782312925,
+    "duration_ms": 243.80952380952385,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11272.516,
+      "zcr": 0.10082783,
+      "low_band_energy": 0.04018856,
+      "mid_band_energy": 0.14890616,
+      "high_band_energy": 0.8109053,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 11.833674
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.39285716
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 2507.7551020408164,
+    "duration_ms": 255.41950113378698,
+    "class": "Click",
+    "confidence": 0.8,
+    "features": {
+      "spectral_centroid": 2276.8376,
+      "zcr": 0.07404777,
+      "low_band_energy": 0.058843516,
+      "mid_band_energy": 0.83970433,
+      "high_band_energy": 0.10145218,
+      "peak_amplitude": 0.6279907,
+      "crest_factor": 11.552109
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.2857143
+      },
+      {
+        "class": "Click",
+        "score": 0.8
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.265
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 2763.1746031746034,
+    "duration_ms": 267.02947845804965,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11290.86,
+      "zcr": 0.092067264,
+      "low_band_energy": 0.039317936,
+      "mid_band_energy": 0.14847301,
+      "high_band_energy": 0.81220907,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.383843
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 3030.204081632653,
+    "duration_ms": 232.19954648526073,
+    "class": "BilabialPlosive",
+    "confidence": 1.0,
+    "features": {
+      "spectral_centroid": 100.500916,
+      "zcr": 0.0011721039,
+      "low_band_energy": 0.99995166,
+      "mid_band_energy": 0.000048323032,
+      "high_band_energy": 8.8977075e-8,
+      "peak_amplitude": 0.8485718,
+      "crest_factor": 5.4684873
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 1.0
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.17142858
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.30499998
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 3262.4036281179137,
+    "duration_ms": 267.0294784580501,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11308.695,
+      "zcr": 0.09205945,
+      "low_band_energy": 0.038392458,
+      "mid_band_energy": 0.14807549,
+      "high_band_energy": 0.81353205,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.384369
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 3529.433106575964,
+    "duration_ms": 232.19954648526073,
+    "class": "Click",
+    "confidence": 0.8,
+    "features": {
+      "spectral_centroid": 2283.126,
+      "zcr": 0.08146122,
+      "low_band_energy": 0.0065436703,
+      "mid_band_energy": 0.8910889,
+      "high_band_energy": 0.10236746,
+      "peak_amplitude": 0.6279907,
+      "crest_factor": 11.013966
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.2857143
+      },
+      {
+        "class": "Click",
+        "score": 0.8
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.265
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 3761.6326530612246,
+    "duration_ms": 267.02947845804965,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11325.962,
+      "zcr": 0.092067264,
+      "low_band_energy": 0.03741387,
+      "mid_band_energy": 0.14771375,
+      "high_band_energy": 0.8148724,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.383843
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 4028.662131519274,
+    "duration_ms": 232.19954648526073,
+    "class": "BilabialPlosive",
+    "confidence": 1.0,
+    "features": {
+      "spectral_centroid": 105.15172,
+      "zcr": 0.0011721039,
+      "low_band_energy": 0.9999072,
+      "mid_band_energy": 0.00009257781,
+      "high_band_energy": 1.7071105e-7,
+      "peak_amplitude": 0.8485718,
+      "crest_factor": 5.4684873
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 1.0
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.17142858
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.30499998
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 4260.861678004535,
+    "duration_ms": 267.0294784580501,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11343.009,
+      "zcr": 0.09205945,
+      "low_band_energy": 0.036352567,
+      "mid_band_energy": 0.1473778,
+      "high_band_energy": 0.8162696,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.384369
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 4527.891156462585,
+    "duration_ms": 232.19954648526073,
+    "class": "Click",
+    "confidence": 0.8,
+    "features": {
+      "spectral_centroid": 2281.0984,
+      "zcr": 0.08146122,
+      "low_band_energy": 0.008557464,
+      "mid_band_energy": 0.88894254,
+      "high_band_energy": 0.10250001,
+      "peak_amplitude": 0.6279907,
+      "crest_factor": 11.013966
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.2857143
+      },
+      {
+        "class": "Click",
+        "score": 0.8
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.265
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 4760.090702947846,
+    "duration_ms": 278.63945578231323,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11358.33,
+      "zcr": 0.08822332,
+      "low_band_energy": 0.035303514,
+      "mid_band_energy": 0.1470941,
+      "high_band_energy": 0.8176024,
+      "peak_amplitude": 0.8485718,
+      "crest_factor": 10.652061
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 5038.730158730159,
+    "duration_ms": 220.5895691609976,
+    "class": "BilabialPlosive",
+    "confidence": 1.0,
+    "features": {
+      "spectral_centroid": 71.30519,
+      "zcr": 0.0012338063,
+      "low_band_energy": 1.0,
+      "mid_band_energy": 2.1319778e-8,
+      "high_band_energy": 7.6290657e-10,
+      "peak_amplitude": 0.84594727,
+      "crest_factor": 5.6598744
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 1.0
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.17142858
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.30499998
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 5259.319727891157,
+    "duration_ms": 255.41950113378698,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11373.286,
+      "zcr": 0.09624434,
+      "low_band_energy": 0.03417557,
+      "mid_band_energy": 0.14683396,
+      "high_band_energy": 0.81899047,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.112152
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 5514.739229024944,
+    "duration_ms": 243.80952380952385,
+    "class": "Click",
+    "confidence": 0.8,
+    "features": {
+      "spectral_centroid": 2293.1707,
+      "zcr": 0.07757418,
+      "low_band_energy": 0.037312385,
+      "mid_band_energy": 0.8593052,
+      "high_band_energy": 0.103382446,
+      "peak_amplitude": 0.6279907,
+      "crest_factor": 11.286507
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.2857143
+      },
+      {
+        "class": "Click",
+        "score": 0.8
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.265
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 5758.548752834467,
+    "duration_ms": 278.6394557823123,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11387.282,
+      "zcr": 0.088230506,
+      "low_band_energy": 0.033003084,
+      "mid_band_energy": 0.14660247,
+      "high_band_energy": 0.82039446,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.643612
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 6037.18820861678,
+    "duration_ms": 220.5895691609976,
+    "class": "BilabialPlosive",
+    "confidence": 1.0,
+    "features": {
+      "spectral_centroid": 76.239075,
+      "zcr": 0.0012338063,
+      "low_band_energy": 1.0,
+      "mid_band_energy": 1.142971e-8,
+      "high_band_energy": 6.765065e-10,
+      "peak_amplitude": 0.8485718,
+      "crest_factor": 5.3308086
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 1.0
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.17142858
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.30499998
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 6257.777777777777,
+    "duration_ms": 255.41950113378698,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11400.186,
+      "zcr": 0.09624434,
+      "low_band_energy": 0.031787436,
+      "mid_band_energy": 0.14639698,
+      "high_band_energy": 0.8218156,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.112152
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 6513.197278911564,
+    "duration_ms": 243.80952380952385,
+    "class": "Click",
+    "confidence": 0.8,
+    "features": {
+      "spectral_centroid": 2291.9207,
+      "zcr": 0.07757418,
+      "low_band_energy": 0.041531265,
+      "mid_band_energy": 0.8553351,
+      "high_band_energy": 0.103133604,
+      "peak_amplitude": 0.6279907,
+      "crest_factor": 11.286507
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.2857143
+      },
+      {
+        "class": "Click",
+        "score": 0.8
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.265
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 6757.006802721088,
+    "duration_ms": 278.63945578231323,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11411.893,
+      "zcr": 0.08822332,
+      "low_band_energy": 0.030531226,
+      "mid_band_energy": 0.14621437,
+      "high_band_energy": 0.8232544,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 12.65073
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 7035.646258503401,
+    "duration_ms": 232.19954648526073,
+    "class": "BilabialPlosive",
+    "confidence": 1.0,
+    "features": {
+      "spectral_centroid": 81.49851,
+      "zcr": 0.0011721039,
+      "low_band_energy": 0.9999998,
+      "mid_band_energy": 1.5711069e-7,
+      "high_band_energy": 8.246557e-10,
+      "peak_amplitude": 0.8485718,
+      "crest_factor": 5.4684873
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 1.0
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.17142858
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.30499998
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 7267.845804988662,
+    "duration_ms": 243.80952380952385,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11175.865,
+      "zcr": 0.10082783,
+      "low_band_energy": 0.043669987,
+      "mid_band_energy": 0.1516134,
+      "high_band_energy": 0.80471665,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 11.833674
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.39285716
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 7511.655328798186,
+    "duration_ms": 255.41950113378698,
+    "class": "Click",
+    "confidence": 0.8,
+    "features": {
+      "spectral_centroid": 2289.4238,
+      "zcr": 0.07404777,
+      "low_band_energy": 0.045991506,
+      "mid_band_energy": 0.85122335,
+      "high_band_energy": 0.10278519,
+      "peak_amplitude": 0.6279907,
+      "crest_factor": 11.552109
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.2857143
+      },
+      {
+        "class": "Click",
+        "score": 0.8
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.265
+      }
+    ]
+  },
+  {
+    "timestamp_ms": 7767.074829931973,
+    "duration_ms": 732.925170068027,
+    "class": "HihatNoise",
+    "confidence": 0.7714286,
+    "features": {
+      "spectral_centroid": 11195.112,
+      "zcr": 0.049163226,
+      "low_band_energy": 0.043112416,
+      "mid_band_energy": 0.15101719,
+      "high_band_energy": 0.8058704,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 16.946472
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.44000003
+      },
+      {
+        "class": "HihatNoise",
+        "score": 0.7714286
+      },
+      {
+        "class": "Click",
+        "score": 0.24285714
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.175
+      }
+    ]
+  }
+]

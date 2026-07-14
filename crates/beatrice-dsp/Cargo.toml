@@ -7,7 +7,21 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+realfft = "3.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# "js" gives getrandom a wasm entropy source so Uuid::new_v4() works in the worklet.
+uuid = { version = "1.0", features = ["v4", "serde", "js"] }
+# "wasmbind" gives chrono a wasm clock so Utc::now() works in the worklet.
+chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 wasm-bindgen = { version = "0.2", optional = true }
+# Pinned to =2.0.0-rc.22 to match src-tauri (workspace version unification): the
+# native build consumes this crate with features=["specta"], and specta rc.24/rc.25
+# fail to compile on the pinned Rust floor (see src-tauri/Cargo.toml note). Behind a
+# feature flag so wasm builds exclude specta entirely.
+specta = { version = "=2.0.0-rc.22", features = ["derive", "uuid", "chrono"], optional = true }
 
 [features]
+default = []
 wasm = ["dep:wasm-bindgen"]
+specta = ["dep:specta"]

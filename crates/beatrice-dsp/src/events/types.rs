@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 /// Classification of detected beatbox events
 /// Maps beatbox sounds to musical instruments/synthesis targets
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EventClass {
     /// B/P sounds - bilabial plosives
     /// Triggers: synth bass + kick drum
@@ -70,7 +71,8 @@ impl EventClass {
 /// UI can show real score bars and name the actual runner-up, instead of a
 /// fixed reasoning template. Prefer this struct over a `(EventClass, f32)`
 /// tuple because it generates a clean `{ class, score }` TypeScript shape.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ClassScore {
     /// The candidate event class this score is for.
     pub class: EventClass,
@@ -81,7 +83,8 @@ pub struct ClassScore {
 
 /// Spectral and temporal features extracted from an audio segment
 /// Used for classification and calibration
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventFeatures {
     /// Spectral centroid (Hz) - "center of mass" of spectrum
     /// Higher values indicate brighter/higher-pitched sounds
@@ -147,7 +150,8 @@ impl EventFeatures {
 }
 
 /// A detected beatbox event with timing, classification, and features
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     /// Unique identifier for this event
     pub id: Uuid,

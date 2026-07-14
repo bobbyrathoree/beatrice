@@ -1,0 +1,35 @@
+[
+  {
+    "timestamp_ms": 0.0,
+    "duration_ms": 100.0,
+    "class": "HihatNoise",
+    "confidence": 1.0,
+    "features": {
+      "spectral_centroid": 11269.052,
+      "zcr": 0.49421638,
+      "low_band_energy": 0.027153173,
+      "mid_band_energy": 0.14901981,
+      "high_band_energy": 0.82382697,
+      "peak_amplitude": 0.7966614,
+      "crest_factor": 7.5121684
+    },
+    "all_scores": [
+      {
+        "class": "BilabialPlosive",
+        "score": 0.18857144
+      },
+      {
+        "class": "HihatNoise",
+        "score": 1.0
+      },
+      {
+        "class": "Click",
+        "score": 0.44285712
+      },
+      {
+        "class": "HumVoiced",
+        "score": 0.09
+      }
+    ]
+  }
+]
