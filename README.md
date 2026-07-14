@@ -57,14 +57,75 @@ Beatrice recognizes 4 types of beatbox sounds:
 
 ### Real-World Accuracy
 
-Tested on 3 real human recordings (laptop mic, untrained user):
+Beatrice's classifier is measured two ways: a small in-house demo sanity check,
+and a reproducible run against the published AVP benchmark (see
+[Benchmark](#benchmark) for the honest, apples-to-apples numbers).
 
-- **Detection rate**: 93.8% (43 events across 3 recordings)
-- **Classification accuracy**: 100% of detected events matched user intent
-- **False positives**: 0 confirmed
-- **Tempo estimation**: Within 2% of actual tempo
-- **Best classes**: BilabialPlosive (97-100%), HumVoiced (100%)
-- **Weakest class**: HihatNoise (64-86% confidence — sibilants are quiet on laptop mics)
+> **Demo note (n = 3, not a benchmark).** On 3 hand-recorded clips (laptop mic,
+> one untrained user) the pipeline hit 93.8% detection (43 events), classified
+> every detected event in line with user intent, produced 0 confirmed false
+> positives, and estimated tempo within 2% — with BilabialPlosive/HumVoiced the
+> strongest classes and HihatNoise the weakest (sibilants are quiet on laptop
+> mics). This is an anecdote from one mic, not a defensible accuracy claim.
+> For that, run the AVP benchmark below.
+
+## Benchmark
+
+For a defensible accuracy number, Beatrice ships a runner that measures its
+classifier against the **AVP ("Amateur Vocal Percussion") dataset** (Delgado et
+al., Zenodo, CC-BY) — 28 participants, ~9,780 annotated utterances, using the
+*exact same 4-class taxonomy* Beatrice targets. Published lineage for context:
+the SOTA on AVP is ≈0.90 (a personalized CNN + kNN); classical hand-crafted
+heuristics land around ≈0.84. Beatrice's rule-based classifier is measured
+honestly here — whatever it scores, it scores.
+
+**The dataset is not bundled** (it is large and separately licensed). Download
+it from Zenodo, extract it, and point the runner at the folder.
+
+### Expected layout
+
+```
+<dataset>/
+  <participant_id>/          one directory per participant (28 total)
+    <name>.wav               recording(s)
+    <name>.csv               annotation, SAME stem as its .wav
+```
+
+Each annotation CSV is `<onset_seconds>,<class_label>` per row (a header row is
+tolerated and skipped). AVP labels map to Beatrice classes as:
+
+| AVP label | Meaning | Beatrice class |
+|-----------|---------|----------------|
+| `kd`  | kick drum     | BilabialPlosive |
+| `sd`  | snare drum    | Click |
+| `hhc` | closed hi-hat | HihatNoise |
+| `hho` | open hi-hat   | HihatNoise *(folded — Beatrice has no open-hat class; counted separately in the report)* |
+
+### Protocol
+
+Accuracy is **participant-wise** (matching Delgado et al.): the mean over
+participants of each participant's per-utterance accuracy. The report shows two
+columns side by side, both scored on the **same held-out eval set**:
+
+1. the rule-based heuristic classifier (no personalization), and
+2. a per-participant kNN calibration — the first *N* utterances per class per
+   participant (default 5) build that participant's profile and are **excluded**
+   from that participant's eval set; every remaining utterance is scored.
+
+### Reproduce
+
+```bash
+cd src-tauri
+cargo run --release --bin benchmark -- --dataset ~/datasets/AVP --out avp-results.md
+cargo run --release --bin benchmark -- --help   # full layout + option docs
+```
+
+### Results
+
+_Not yet run — the AVP dataset must be downloaded first._ The `--out` file is a
+ready-to-paste markdown table (overall participant-wise accuracy for heuristic
+vs calibrated, plus per-class precision/recall and the `hho`-folding caveat).
+Paste it here once the dataset is available; do not hand-edit the numbers.
 
 ## Themes
 
@@ -121,7 +182,7 @@ cargo run --bin analyze -- path/to/your/beatbox.wav
 
 ### Run tests
 ```bash
-# Rust: 107 unit tests + 8 integration tests
+# Rust: 140 unit tests (incl. the AVP benchmark's mapping/split logic) + 10 integration tests
 # The integration tests read fixtures from test-audio/, so generate them first.
 node scripts/generate-test-audio.mjs
 cd src-tauri && cargo test

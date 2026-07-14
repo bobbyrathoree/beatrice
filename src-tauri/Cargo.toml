@@ -54,6 +54,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"                      # File hashing
 hex = "0.4"                        # Hex encoding
+csv = "1"                          # AVP benchmark annotation CSV parsing
 dirs = "5.0"                       # App data directories
 thiserror = "2.0"                  # Error handling
 
