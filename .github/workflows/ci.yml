@@ -11,6 +11,7 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx vite build
       - run: npx vitest run
+      - run: npm run lint:ipc
       # The jam e2e drives a fake microphone fed from test-audio/test-pattern.wav
       # (see playwright.config.ts). That directory is gitignored and generated on
       # demand, so a fresh CI checkout must build the fixtures before Playwright

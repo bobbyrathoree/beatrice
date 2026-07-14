@@ -10,7 +10,7 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "lint:ipc": "! grep -rln --include=*.ts --include=*.tsx @tauri-apps/api/core src | grep -v -e ^src/bindings.ts$ -e ^src/utils/tauri-mock.ts$ -e \\.test\\.ts$ -e \\.test\\.tsx$",
-    "check:rust": "cargo test --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "check:rust": "cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "check": "tsc --noEmit && vite build && npm run lint:ipc && vitest run && npm run check:rust",
     "tauri": "tauri"
   },

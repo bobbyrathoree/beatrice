@@ -33,17 +33,16 @@ import type { Project, Run } from "./store/useStore";
 import type { ProjectSummary } from "./hooks/useProjects";
 import type { EventDecision } from "./types/explainability";
 import { EVENT_CLASS_NAMES } from "./types/explainability";
+import { mapThemeNameToTemplate } from "./utils/themeTemplate";
 import "./styles/brutalist.css";
 
 type AppState = "input" | "recording" | "jam" | "processing" | "results";
 
-// Map a selected theme to an arrangement template name
+// Map a selected theme to an arrangement template name. Thin wrapper over the
+// shared, unit-tested name→template resolver so a Theme object and a persisted
+// run.theme string both map identically.
 function mapThemeToTemplate(theme: Theme | null): string {
-  if (!theme) return "synthwave_straight";
-  const name = theme.name?.toUpperCase() || "";
-  if (name.includes("BLADE RUNNER")) return "synthwave_halftime";
-  if (name.includes("STRANGER")) return "arp_drive";
-  return "synthwave_straight";
+  return mapThemeNameToTemplate(theme?.name);
 }
 
 // Full result of a pipeline run, shared with the results-screen components.
@@ -404,6 +403,9 @@ function App() {
           arrangement,
         };
       });
+      // A successful re-arrange clears any stale error banner from a prior
+      // failed attempt so the results screen doesn't show an outdated error.
+      setError(null);
     } catch (err) {
       console.error("Re-arrange failed:", err);
       setError(formatIpcError(err));
@@ -526,6 +528,20 @@ function App() {
         bEmphasis: run.b_emphasis,
       });
 
+      // Sync the theme selector to the run's saved theme. The results-screen
+      // re-arrange path keys off `selectedTheme`, so without this a later
+      // groove tweak would silently re-arrange with the previously-selected
+      // theme. Best-effort: an unknown/removed theme just leaves the current
+      // selection (replay still uses run.theme directly for its arrangement).
+      try {
+        const runTheme = unwrap(await commands.getTheme(run.theme));
+        if (runTheme) {
+          setSelectedTheme(runTheme);
+        }
+      } catch {
+        console.warn(`Could not load theme "${run.theme}" for replay`);
+      }
+
       // Update grid settings from run
       setGridSettings((prev) => ({
         ...prev,
@@ -581,7 +597,10 @@ function App() {
           const arrangement = unwrap(
             await commands.arrangeEventsCommand({
               events: quantized,
-              template: mapThemeToTemplate(selectedTheme),
+              // Derive the template from the run's persisted theme, not the
+              // current UI selection — otherwise replay would arrange with a
+              // template from whatever theme happens to be selected now.
+              template: mapThemeNameToTemplate(run.theme),
               theme_name: run.theme,
               bpm: run.bpm,
               time_signature: gridSettings.time_signature,
