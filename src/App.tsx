@@ -17,6 +17,7 @@ import { ThemeSelector, type Theme } from "./components/Theme/ThemeSelector";
 import { GrooveControls, type GridSettings, type QuantizeSettings } from "./components/Groove/GrooveControls";
 import { DemoButton } from "./components/DemoButton";
 import { BEmphasisSlider } from "./components/BEmphasisSlider";
+import { FidelitySlider } from "./components/Groove/FidelitySlider";
 import { ExportControls } from "./components/ExportControls";
 import { Timeline } from "./components/Explainability/Timeline";
 import { ArrangementLanes } from "./components/Explainability/ArrangementLanes";
@@ -406,7 +407,7 @@ function App() {
     } finally {
       setIsReArranging(false);
     }
-  }, [pipelineResult?.events, isPipelineRunning, isReArranging, gridSettings, quantizeSettings, selectedTheme, pipelineParams.bEmphasis]);
+  }, [pipelineResult?.events, isPipelineRunning, isReArranging, gridSettings, quantizeSettings, selectedTheme, pipelineParams.bEmphasis, pipelineParams.fidelity]);
 
   // Debounced re-arrange: fires 300ms after any control change on the results screen
   // Skips the initial trigger when first entering results (pipeline just ran)
@@ -438,7 +439,7 @@ function App() {
         clearTimeout(reArrangeTimerRef.current);
       }
     };
-  }, [gridSettings, quantizeSettings, selectedTheme, pipelineParams.bEmphasis, state, pipelineResult?.events, isPipelineRunning, reArrange]);
+  }, [gridSettings, quantizeSettings, selectedTheme, pipelineParams.bEmphasis, pipelineParams.fidelity, state, pipelineResult?.events, isPipelineRunning, reArrange]);
 
   // Event handlers
   const handleError = useCallback((errorMessage: string) => {
@@ -470,6 +471,10 @@ function App() {
 
   const handleBEmphasisChange = useCallback((value: number) => {
     setPipelineParam("bEmphasis", value);
+  }, [setPipelineParam]);
+
+  const handleFidelityChange = useCallback((value: number) => {
+    setPipelineParam("fidelity", value);
   }, [setPipelineParam]);
 
   const handleNewRecording = useCallback(() => {
@@ -962,6 +967,19 @@ function App() {
                 <BEmphasisSlider
                   value={pipelineParams.bEmphasis}
                   onChange={handleBEmphasisChange}
+                  disabled={false}
+                />
+              </motion.div>
+
+              {/* Fidelity Slider — PRODUCE FOR ME <-> FOLLOW ME */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.45 }}
+              >
+                <FidelitySlider
+                  value={pipelineParams.fidelity}
+                  onChange={handleFidelityChange}
                   disabled={false}
                 />
               </motion.div>

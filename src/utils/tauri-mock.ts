@@ -87,11 +87,12 @@ function buildMockArrangement(args: Record<string, any>): unknown {
   const phaseOffsetMs = args?.input?.phase_offset_ms ?? 0;
   // Placement fidelity (spec §4.3, serde default 0.8 in ArrangeEventsInput). The
   // mock has never template-gated — it pushes every detected event into its lane —
-  // so it already matches the Rust arranger's "never delete" contract at fidelity
-  // 1.0. Off-template slot-snapping (fidelity < 1.0) is a real-backend nicety not
-  // reproduced here; the browser demo simply plays events where they land.
-  const _fidelity = args?.input?.fidelity ?? 0.8;
-  void _fidelity;
+  // so it already matches the Rust arranger's "never delete" contract. To make the
+  // slider audibly/visibly meaningful in the browser demo we reproduce the real
+  // backend's placement behaviour: fidelity 1.0 ("FOLLOW ME") plays every hit at its
+  // quantized position; lower fidelity ("PRODUCE FOR ME") pulls each hit toward the
+  // nearest template slot (a beat), clamped to [0.0, 1.0]. Event count never changes.
+  const fidelity = Math.min(1, Math.max(0, args?.input?.fidelity ?? 0.8));
   const totalDurationMs = (barCount * 4 * 60000) / bpm;
   const template = args?.input?.template || 'synthwave_straight';
 
@@ -119,7 +120,12 @@ function buildMockArrangement(args: Record<string, any>): unknown {
   for (const qe of quantizedEvents) {
     const event = qe.event || qe.original_event || qe;
     const cls = (event.class || '').toLowerCase();
-    const timestamp = qe.quantized_timestamp_ms ?? event.timestamp_ms ?? 0;
+    const quantizedTs = qe.quantized_timestamp_ms ?? event.timestamp_ms ?? 0;
+    // Nearest template slot = nearest beat (the coarse "producer" grid). Blend the
+    // performer's quantized position toward it by (1 - fidelity): fidelity 1.0 keeps
+    // the hit verbatim, fidelity 0.0 snaps it fully onto the template beat.
+    const templateSlot = Math.round(quantizedTs / msPerBeat) * msPerBeat;
+    const timestamp = quantizedTs * fidelity + templateSlot * (1 - fidelity);
 
     const note = {
       timestamp_ms: timestamp,
