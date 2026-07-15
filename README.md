@@ -75,8 +75,8 @@ For a defensible accuracy number, Beatrice ships a runner that measures its
 classifier against the **AVP ("Amateur Vocal Percussion") dataset** (Delgado et
 al., Zenodo, CC-BY) — 28 participants, ~9,780 annotated utterances, using the
 *exact same 4-class taxonomy* Beatrice targets. Published lineage for context:
-the SOTA on AVP is ≈0.90 (a personalized CNN + kNN); classical hand-crafted
-heuristics land around ≈0.84. Beatrice's rule-based classifier is measured
+the SOTA on AVP is ≈0.90 (a personalized CNN + kNN); a classical MFCC + kNN
+baseline lands around ≈0.84. Beatrice's rule-based classifier is measured
 honestly here — whatever it scores, it scores.
 
 **The dataset is not bundled** (it is large and separately licensed). Download
@@ -91,8 +91,21 @@ it from Zenodo, extract it, and point the runner at the folder.
     <name>.csv               annotation, SAME stem as its .wav
 ```
 
-Each annotation CSV is `<onset_seconds>,<class_label>` per row (a header row is
-tolerated and skipped). AVP labels map to Beatrice classes as:
+The Zenodo zip ships split by modality (`Personal/Participant_N` and
+`Fixed/Participant_N`); merge both modalities into one directory per
+participant first — symlinks are fine:
+
+```bash
+unzip AVP_Dataset.zip && mkdir -p AVP
+for i in $(seq 1 28); do
+  mkdir -p AVP/Participant_$i
+  ln -s "$PWD"/AVP_Dataset/{Personal,Fixed}/Participant_$i/*.{csv,wav} AVP/Participant_$i/
+done
+```
+
+Each annotation CSV is `<onset_seconds>,<class_label>,...` per row (extra
+columns such as the v4 phoneme labels are ignored; a header row is tolerated
+and skipped). AVP labels map to Beatrice classes as:
 
 | AVP label | Meaning | Beatrice class |
 |-----------|---------|----------------|
@@ -122,10 +135,35 @@ cargo run --release --bin benchmark -- --help   # full layout + option docs
 
 ### Results
 
-_Not yet run — the AVP dataset must be downloaded first._ The `--out` file is a
-ready-to-paste markdown table (overall participant-wise accuracy for heuristic
-vs calibrated, plus per-class precision/recall and the `hho`-folding caveat).
-Paste it here once the dataset is available; do not hand-edit the numbers.
+Run 2026-07-15 against AVP v4 (Zenodo record 5036529): 28 participants, 9,777
+annotated utterances, 9,357 scored on the held-out eval set (1 unknown-label
+row skipped; 2,204 open-hat `hho` utterances folded into HihatNoise). Full
+generated report: [docs/avp-results-2026-07-15.md](docs/avp-results-2026-07-15.md).
+
+| Classifier | Participant-wise accuracy |
+|---|---|
+| Heuristic (no calibration) | **65.8%** |
+| Per-participant calibrated (kNN, k=5, 5/class) | 60.1% |
+
+| Class | Heuristic P | Heuristic R | Calibrated P | Calibrated R |
+|---|---|---|---|---|
+| kd → BilabialPlosive | 76.2% | 72.4% | 73.5% | 84.9% |
+| hhc/hho → HihatNoise | 67.1% | 85.2% | 68.9% | 55.0% |
+| sd → Click | 43.8% | 20.8% | 34.9% | 41.9% |
+| (none) → HumVoiced | 0.0% | — | — | — |
+
+**Honest read.** The heuristic lands at 65.8% — between the published
+user-agnostic HMM baseline (≈0.73) and chance, and well below the classical
+MFCC + kNN (≈0.84) and CNN SOTA (≈0.90). Kick and hi-hat carry it; the snare
+(`sd` → Click) class is the clear weakness (20.8% recall — most snares are
+misread as kicks or hi-hats), matching what the n = 3 demo hinted at. The
+7-feature kNN calibration *hurts* on this dataset (60.1%, and it drops further
+with more calibration samples) — the current feature vector doesn't separate
+snares from kicks in feature space, so personalization amplifies the confusion
+rather than fixing it. HumVoiced never appears in AVP (no hum class), so every
+HumVoiced prediction is a false positive by construction. This is the
+motivation for the roadmap's CNN-embedding classifier (AVP-LVT, 0.90 bar);
+these numbers are the baseline it has to beat.
 
 ## Themes
 
