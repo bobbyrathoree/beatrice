@@ -55,6 +55,12 @@ Beatrice recognizes 4 types of beatbox sounds:
 | "T" or "K" (tongue click) | Click | Snare drum | Mid-frequency transient, sharp crest factor |
 | Humming / "mmm" | HumVoiced | Pad chord (triad) | Sustained tone, low crest factor |
 
+Under the hood, percussive sounds are classified by a compact Gaussian model
+over 20 MFCCs + zcr + crest factor, fitted on the AVP dataset (9,777 labeled
+utterances from 28 people) and embedded in the binary (~2 KB); sustained
+signals are gated to a rule-based hum detector. See
+[Benchmark](#benchmark) for measured accuracy and the model's design notes.
+
 ### Real-World Accuracy
 
 Beatrice's classifier is measured two ways: a small in-house demo sanity check,
@@ -142,28 +148,39 @@ generated report: [docs/avp-results-2026-07-15.md](docs/avp-results-2026-07-15.m
 
 | Classifier | Participant-wise accuracy |
 |---|---|
-| Heuristic (no calibration) | **65.8%** |
-| Per-participant calibrated (kNN, k=5, 5/class) | 60.1% |
+| Rule heuristic (v1 classifier, no calibration) | 65.8% |
+| Per-participant kNN on 7 scalar features (v1 calibration, retired) | 60.2% |
+| **Gaussian MFCC model, user-agnostic (LOPO)** — ships as default | 79.7% |
+| **Gaussian MFCC model + MAP calibration (LOPO, tau=10)** — ships as "teach Beatrice" | **81.6%** |
 
-| Class | Heuristic P | Heuristic R | Calibrated P | Calibrated R |
+| Class | Heuristic P | Heuristic R | Gaussian P | Gaussian R |
 |---|---|---|---|---|
-| kd → BilabialPlosive | 76.2% | 72.4% | 73.5% | 84.9% |
-| hhc/hho → HihatNoise | 67.1% | 85.2% | 68.9% | 55.0% |
-| sd → Click | 43.8% | 20.8% | 34.9% | 41.9% |
-| (none) → HumVoiced | 0.0% | — | — | — |
+| kd → BilabialPlosive | 76.2% | 72.4% | 91.1% | 85.5% |
+| hhc/hho → HihatNoise | 67.1% | 85.2% | 81.2% | 87.3% |
+| sd → Click | 43.8% | 20.8% | 70.8% | 65.8% |
+| (none) → HumVoiced | 0.0% | — | 0.0% | — |
 
-**Honest read.** The heuristic lands at 65.8% — between the published
-user-agnostic HMM baseline (≈0.73) and chance, and well below the classical
-MFCC + kNN (≈0.84) and CNN SOTA (≈0.90). Kick and hi-hat carry it; the snare
-(`sd` → Click) class is the clear weakness (20.8% recall — most snares are
-misread as kicks or hi-hats), matching what the n = 3 demo hinted at. The
-7-feature kNN calibration *hurts* on this dataset (60.1%, and it drops further
-with more calibration samples) — the current feature vector doesn't separate
-snares from kicks in feature space, so personalization amplifies the confusion
-rather than fixing it. HumVoiced never appears in AVP (no hum class), so every
-HumVoiced prediction is a false positive by construction. This is the
-motivation for the roadmap's CNN-embedding classifier (AVP-LVT, 0.90 bar);
-these numbers are the baseline it has to beat.
+**How the shipping classifier works.** The first benchmark run exposed the
+v1 design: the rule heuristic scored 65.8% (snare recall 20.8% — most snares
+misread as kick or hi-hat) and the 7-scalar-feature kNN calibration actively
+*hurt* (60.2%). The fix is a **hybrid**: 20 MFCCs + zcr + crest factor feed a
+diagonal-covariance Gaussian classifier fitted on all 28 AVP participants
+(~2 KB of JSON, embedded in both the native binary and the WASM worklet), with
+a sustained-signal gate (crest < 2.2 ∧ zcr < 0.15, 0.04% false-fire on AVP)
+routing hums to the heuristic since AVP has no hum class. Calibration is MAP
+mean adaptation — 5 labeled samples per class shift the factory means about a
+third of the way toward the user's voice — worth +1.9 points and, unlike the
+retired kNN, it never *degrades* the factory model.
+
+**Honest read.** The Gaussian numbers are leave-one-participant-out: each
+participant is scored by a model that never saw their voice. 81.6% sits above
+the published user-agnostic HMM baseline (≈0.73), below the personalized CNN
+SOTA (≈0.90); the classical "MFCC + kNN ≈ 0.84" lineage number is boxeme-wise
+on a different split, so it is not directly comparable to our participant-wise
+protocol. Snare remains the hardest class (65.8% recall — snare imitations
+genuinely overlap hi-hats in timbre), and HumVoiced is unmeasurable on AVP by
+construction. The remaining ~8-point gap to SOTA is the roadmap's
+CNN-embedding classifier (AVP-LVT, 0.90 bar).
 
 ## Themes
 

@@ -588,11 +588,15 @@ pub fn extract_mfcc_stats(
     }
 
     // Precompute the mel filterbank for this frame size / sample rate.
-    // Filter edges are MFCC_MEL_FILTERS + 2 points evenly spaced in mel
-    // from 0 to Nyquist.
+    // Filter edges are MFCC_MEL_FILTERS + 2 points evenly spaced in mel from
+    // 0 to min(Nyquist, 22.05 kHz). The fixed cap makes the filterbank — and
+    // therefore the coefficients — identical across sample rates ≥ 44.1 kHz:
+    // the factory model is fitted on 44.1 kHz AVP audio, while live capture
+    // (AudioContext) commonly runs at 48 kHz. Without the cap, 48 kHz audio
+    // gets systematically shifted filters and a silently degraded model.
     let n_bins = MFCC_FRAME / 2 + 1;
     let bin_width = sample_rate as f32 / MFCC_FRAME as f32;
-    let mel_max = hz_to_mel(sample_rate as f32 / 2.0);
+    let mel_max = hz_to_mel((sample_rate as f32 / 2.0).min(22_050.0));
     let edges: Vec<f32> = (0..MFCC_MEL_FILTERS + 2)
         .map(|i| mel_to_hz(mel_max * i as f32 / (MFCC_MEL_FILTERS + 1) as f32))
         .collect();
@@ -801,6 +805,42 @@ mod tests {
             .sum::<f32>()
             .sqrt();
         assert!(dist > 1.0, "tone/noise MFCC distance too small: {dist}");
+    }
+
+    #[test]
+    fn test_mfcc_sample_rate_invariance_for_percussive_sounds() {
+        // The factory model is fitted at 44.1 kHz AVP audio; live capture
+        // (AudioContext) commonly runs at 48 kHz. For BROADBAND percussive
+        // signals — the only ones the Gaussian model sees; sustained tones are
+        // gated to the heuristic before MFCCs matter — the same sound at both
+        // rates must land close in MFCC space. (The 22.05 kHz filterbank cap
+        // is what buys this; without it every filter shifts by the Nyquist
+        // ratio.) Pure tones are excluded by design: most filters sit at the
+        // log floor there and tiny leakage differences swamp the comparison.
+        let burst = |sr: u32| -> Vec<f32> {
+            let mut state = 12345u64;
+            (0..(sr as usize / 10))
+                .map(|i| {
+                    state = state
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    let noise = ((state >> 33) as f32 / (u32::MAX >> 1) as f32) - 1.0;
+                    let env = (-(i as f32) / (sr as f32 * 0.03)).exp(); // 30ms decay
+                    noise * env * 0.7
+                })
+                .collect()
+        };
+        let m44 = extract_mfcc(&burst(44_100), 44_100);
+        let m48 = extract_mfcc(&burst(48_000), 48_000);
+        let dist: f32 = m44
+            .iter()
+            .zip(m48.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f32>()
+            .sqrt();
+        // Cross-rate distance must be small vs. between-class distances
+        // (kick vs hihat mean distance on AVP is ~40 in raw MFCC space).
+        assert!(dist < 5.0, "44.1k vs 48k MFCC distance too large: {dist}");
     }
 
     #[test]

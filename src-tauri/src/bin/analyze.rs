@@ -38,8 +38,10 @@ fn main() {
         return;
     }
 
-    // Shared offline detect→feature→classify loop (single home in beatrice-dsp).
-    let events = beatrice_dsp::analyze_offline(&audio, &config);
+    // Shared offline detect→feature→classify loop (single home in beatrice-dsp),
+    // through the shipping hybrid classifier (AVP Gaussian + hum gate).
+    let hybrid = beatrice_dsp::HybridClassifier::factory();
+    let events = beatrice_dsp::analyze_offline_hybrid(&audio, &config, &hybrid);
     println!("\n=== EVENTS ===");
     for (i, e) in events.iter().enumerate() {
         let f = &e.features;
