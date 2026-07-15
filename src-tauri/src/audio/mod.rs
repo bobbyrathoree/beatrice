@@ -13,5 +13,8 @@ pub mod recording;
 pub use beatrice_dsp::features;
 
 pub use ingest::{ingest_wav, AudioData, AudioError};
-pub use features::{detect_onsets, extract_features, extract_features_for_window, Onset, OnsetConfig};
+pub use features::{
+    detect_onsets, extract_features, extract_features_for_window, extract_mfcc,
+    extract_mfcc_for_window, extract_mfcc_stats, Onset, OnsetConfig, MFCC_COEFFS,
+};
 pub use recording::{AudioRecorder, RecordingData, RecordingError};

@@ -9,13 +9,15 @@
 
 // Re-export the DSP event submodules so existing `crate::events::{types,
 // heuristic, calibration}::…` paths still resolve.
-pub use beatrice_dsp::events::{calibration, heuristic, types};
+pub use beatrice_dsp::events::{calibration, gaussian, heuristic, hybrid, types};
 
 pub mod backend;
 pub mod explainability;
 
 pub use backend::{Classifier, ClassifierBackend, ClassifierError};
 pub use calibration::{CalibrationProfile, CalibrationSample, KnnClassifier};
+pub use gaussian::{gaussian_features, GaussianModel, DEFAULT_MAP_TAU, GAUSSIAN_DIMS};
 pub use heuristic::{ClassificationResult, ClassifierConfig, HeuristicClassifier};
+pub use hybrid::{HybridClassifier, HUM_GATE_MAX_CREST, HUM_GATE_MAX_ZCR};
 pub use types::{ClassScore, Event, EventClass, EventFeatures};
 pub use explainability::{EventDecision, AssignedNote};

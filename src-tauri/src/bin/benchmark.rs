@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 
 use beatrice_lib::audio::{self, AudioData};
 use beatrice_lib::events::{
-    CalibrationProfile, CalibrationSample, EventClass, EventFeatures, HeuristicClassifier,
-    KnnClassifier,
+    gaussian_features, CalibrationProfile, CalibrationSample, EventClass, EventFeatures,
+    GaussianModel, HeuristicClassifier, HybridClassifier, KnnClassifier, DEFAULT_MAP_TAU,
 };
 
 /// Feature window (ms) extracted around each annotated onset. Fixed so every
@@ -57,6 +57,10 @@ OPTIONS:
     --calib-per-class <N>    Calibration utterances per class per participant
                              (default: 5). The rest form the eval set.
     --window-ms <MS>         Feature window around each onset (default: 150).
+    --dump-features <FILE>   Also write every item's features + split as CSV
+                             (for offline error analysis / tuning).
+    --fit-model <FILE>       Fit the Gaussian factory model on ALL participants
+                             and write it as JSON (the embeddable artifact).
     -h, --help               Print this help.
 
 EXPECTED DATASET LAYOUT:
@@ -370,6 +374,42 @@ fn extract_all_features(items: &[Item], window_ms: f64) -> Result<Vec<EventFeatu
     Ok(feats)
 }
 
+/// Extract MFCC (mean, std) stats for every item (same per-WAV cache pattern
+/// as `extract_all_features`). Aligned by index with `items`.
+fn extract_all_mfccs(
+    items: &[Item],
+    window_ms: f64,
+) -> Result<Vec<(Vec<f32>, Vec<f32>)>, String> {
+    let mut cache: HashMap<PathBuf, AudioData> = HashMap::new();
+    let mut mfccs = Vec::with_capacity(items.len());
+
+    for it in items {
+        if !cache.contains_key(&it.wav_path) {
+            let bytes = std::fs::read(&it.wav_path)
+                .map_err(|e| format!("cannot read {}: {e}", it.wav_path.display()))?;
+            let audio = audio::ingest_wav(&bytes)
+                .map_err(|e| format!("cannot decode {}: {e}", it.wav_path.display()))?;
+            cache.insert(it.wav_path.clone(), audio);
+        }
+        let audio = &cache[&it.wav_path];
+        let start_sample = ((it.onset_ms / 1000.0) * audio.sample_rate as f64) as usize;
+        let dur_samples = ((window_ms / 1000.0) * audio.sample_rate as f64) as usize;
+        let mono = audio.to_mono();
+        let end_sample = (start_sample + dur_samples).min(mono.len());
+        if start_sample >= mono.len() || start_sample >= end_sample {
+            let n = beatrice_lib::audio::MFCC_COEFFS;
+            mfccs.push((vec![0.0; n], vec![0.0; n]));
+            continue;
+        }
+        mfccs.push(audio::extract_mfcc_stats(
+            &mono[start_sample..end_sample],
+            audio.sample_rate,
+            beatrice_lib::audio::MFCC_COEFFS,
+        ));
+    }
+    Ok(mfccs)
+}
+
 // ---------------------------------------------------------------------------
 // Report assembly.
 // ---------------------------------------------------------------------------
@@ -402,6 +442,91 @@ fn group_by_participant(items: &[Item]) -> Vec<(String, Vec<usize>)> {
             (p, idx)
         })
         .collect()
+}
+
+/// Run the Gaussian/hybrid passes with leave-one-participant-out (LOPO) rigor:
+/// for each participant, fit a factory model on the other 27 participants'
+/// items, then score that participant's eval set twice — user-agnostic, and
+/// MAP-adapted from the participant's own calibration samples. LOPO is the
+/// honest protocol for a fitted model: the scored participant's voice never
+/// appears in their own factory model. Scoring goes through
+/// [`HybridClassifier`] (Gaussian + sustained-signal hum gate), i.e. the exact
+/// construction the app ships — a gated event that the heuristic calls
+/// HumVoiced scores as wrong here, since AVP has no hum truth.
+fn run_gaussian_passes(
+    items: &[Item],
+    feats: &[EventFeatures],
+    mfccs: &[Vec<f32>],
+    gfeats: &[Vec<f32>],
+    calib_per_class: usize,
+) -> (PassResult, PassResult) {
+    let mut agnostic = PassResult {
+        per_participant: Vec::new(),
+        confusion: Confusion::new(),
+        scored: 0,
+    };
+    let mut adapted = PassResult {
+        per_participant: Vec::new(),
+        confusion: Confusion::new(),
+        scored: 0,
+    };
+
+    for (participant, indices) in group_by_participant(items) {
+        // Factory model: everyone EXCEPT this participant.
+        let train: Vec<(EventClass, Vec<f32>)> = items
+            .iter()
+            .zip(gfeats.iter())
+            .filter(|(it, _)| it.participant != participant)
+            .map(|(it, v)| (it.label, v.clone()))
+            .collect();
+        let Some(model) = GaussianModel::fit(&train) else {
+            continue;
+        };
+
+        // This participant's calib/eval split (same split as the other passes).
+        let participant_items: Vec<Item> = indices.iter().map(|&i| items[i].clone()).collect();
+        let (calib_idx_local, eval_idx_local) =
+            participant_split_indices(&participant_items, calib_per_class);
+        let calib_global: Vec<usize> = calib_idx_local.iter().map(|&li| indices[li]).collect();
+        let eval_global: Vec<usize> = eval_idx_local.iter().map(|&li| indices[li]).collect();
+
+        let calib_samples: Vec<(EventClass, Vec<f32>)> = calib_global
+            .iter()
+            .map(|&g| (items[g].label, gfeats[g].clone()))
+            .collect();
+        let agn_clf = HybridClassifier::with_model(model.clone());
+        let ada_clf =
+            HybridClassifier::with_model(model.map_adapt(&calib_samples, DEFAULT_MAP_TAU));
+
+        let mut agn_correct = 0usize;
+        let mut ada_correct = 0usize;
+        for &g in &eval_global {
+            let truth = items[g].label;
+            let apred = agn_clf.classify(&feats[g], &mfccs[g]).class;
+            *agnostic.confusion.entry((truth, apred)).or_insert(0) += 1;
+            if apred == truth {
+                agn_correct += 1;
+            }
+            agnostic.scored += 1;
+
+            let upred = ada_clf.classify(&feats[g], &mfccs[g]).class;
+            *adapted.confusion.entry((truth, upred)).or_insert(0) += 1;
+            if upred == truth {
+                ada_correct += 1;
+            }
+            adapted.scored += 1;
+        }
+        if !eval_global.is_empty() {
+            agnostic
+                .per_participant
+                .push((agn_correct, eval_global.len()));
+            adapted
+                .per_participant
+                .push((ada_correct, eval_global.len()));
+        }
+    }
+
+    (agnostic, adapted)
 }
 
 /// Run both passes. Both are scored on the same held-out eval set.
@@ -491,10 +616,14 @@ fn build_report(
     window_ms: f64,
     heur: &PassResult,
     calib: &PassResult,
+    gauss_agn: &PassResult,
+    gauss_ada: &PassResult,
 ) -> String {
     let participants = group_by_participant(items).len();
     let heur_overall = mean_participant_accuracy(&heur.per_participant) * 100.0;
     let calib_overall = mean_participant_accuracy(&calib.per_participant) * 100.0;
+    let gauss_agn_overall = mean_participant_accuracy(&gauss_agn.per_participant) * 100.0;
+    let gauss_ada_overall = mean_participant_accuracy(&gauss_ada.per_participant) * 100.0;
 
     let mut out = String::new();
     out.push_str("# AVP Benchmark Results\n\n");
@@ -518,24 +647,34 @@ fn build_report(
     out.push_str("| Classifier | Accuracy |\n|---|---|\n");
     out.push_str(&format!("| Heuristic (no calibration) | {heur_overall:.1}% |\n"));
     out.push_str(&format!(
-        "| Per-participant calibrated (kNN, k={KNN_K}) | {calib_overall:.1}% |\n\n"
+        "| Per-participant calibrated (kNN, k={KNN_K}) | {calib_overall:.1}% |\n"
+    ));
+    out.push_str(&format!(
+        "| Gaussian MFCC model, user-agnostic (LOPO) | {gauss_agn_overall:.1}% |\n"
+    ));
+    out.push_str(&format!(
+        "| Gaussian MFCC model + MAP calibration (LOPO, tau={DEFAULT_MAP_TAU:.0}) | **{gauss_ada_overall:.1}%** |\n\n"
     ));
 
     out.push_str("## Per-class precision / recall\n\n");
-    out.push_str("| Class | Heuristic P | Heuristic R | Calibrated P | Calibrated R |\n");
-    out.push_str("|---|---|---|---|---|\n");
+    out.push_str(
+        "| Class | Heuristic P | Heuristic R | kNN P | kNN R | Gaussian P | Gaussian R |\n",
+    );
+    out.push_str("|---|---|---|---|---|---|---|\n");
     let fmt = |v: Option<f64>| match v {
         Some(x) => format!("{:.1}%", x * 100.0),
         None => "—".to_string(),
     };
     for &c in &CLASSES {
         out.push_str(&format!(
-            "| {} | {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} |\n",
             class_label(c),
             fmt(precision(&heur.confusion, c)),
             fmt(recall(&heur.confusion, c)),
             fmt(precision(&calib.confusion, c)),
             fmt(recall(&calib.confusion, c)),
+            fmt(precision(&gauss_ada.confusion, c)),
+            fmt(recall(&gauss_ada.confusion, c)),
         ));
     }
     out.push('\n');
@@ -543,10 +682,13 @@ fn build_report(
     out.push_str(
         "## Protocol\n\n\
          Participant-wise accuracy (Delgado et al.): the mean over participants of each \
-         participant's per-utterance accuracy. Both classifiers are scored on the same \
+         participant's per-utterance accuracy. All classifiers are scored on the same \
          held-out eval set — every utterance after the first N per class per participant. \
          Calibration examples come from the same participant but are excluded from that \
-         participant's eval set. Open hi-hat (`hho`) has no Beatrice class and is folded \
+         participant's eval set. The Gaussian rows are leave-one-participant-out: each \
+         participant is scored by a model fitted only on the other 27 participants \
+         (their own voice never trains their factory model), then MAP-adapted from their \
+         calibration samples. Open hi-hat (`hho`) has no Beatrice class and is folded \
          into HihatNoise (counted above).\n\n\
          Dataset: AVP \"Amateur Vocal Percussion\" (Delgado et al.), Zenodo, CC-BY.\n",
     );
@@ -564,6 +706,8 @@ struct Args {
     out: PathBuf,
     calib_per_class: usize,
     window_ms: f64,
+    dump_features: Option<PathBuf>,
+    fit_model: Option<PathBuf>,
 }
 
 /// Parse CLI args. Returns `Ok(None)` when `--help` was requested.
@@ -572,6 +716,8 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
     let mut out = PathBuf::from("avp-results.md");
     let mut calib_per_class = DEFAULT_CALIB_PER_CLASS;
     let mut window_ms = FEATURE_WINDOW_MS;
+    let mut dump_features: Option<PathBuf> = None;
+    let mut fit_model: Option<PathBuf> = None;
 
     let mut i = 0;
     while i < argv.len() {
@@ -601,6 +747,16 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
                     .parse()
                     .map_err(|_| format!("invalid --window-ms value: {v}"))?;
             }
+            "--dump-features" => {
+                i += 1;
+                let v = argv.get(i).ok_or("--dump-features requires a path argument")?;
+                dump_features = Some(PathBuf::from(v));
+            }
+            "--fit-model" => {
+                i += 1;
+                let v = argv.get(i).ok_or("--fit-model requires a path argument")?;
+                fit_model = Some(PathBuf::from(v));
+            }
             other => return Err(format!("unknown argument: {other}\n\nRun with --help.")),
         }
         i += 1;
@@ -615,6 +771,8 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
         out,
         calib_per_class,
         window_ms,
+        dump_features,
+        fit_model,
     }))
 }
 
@@ -640,9 +798,115 @@ fn run() -> Result<(), String> {
 
     println!("Extracting features ({}ms window) ...", args.window_ms as i64);
     let feats = extract_all_features(&items, args.window_ms)?;
+    println!("Extracting MFCCs ...");
+    let mfccs = extract_all_mfccs(&items, args.window_ms)?;
+    let gfeats: Vec<Vec<f32>> = feats
+        .iter()
+        .zip(mfccs.iter())
+        .map(|(f, (mean, _std))| gaussian_features(f, mean))
+        .collect();
+
+    if let Some(dump_path) = &args.dump_features {
+        println!("Extracting rich MFCC variants for the feature dump ...");
+        let heuristic = HeuristicClassifier::new();
+        let n20 = 20usize;
+        let n13 = beatrice_lib::audio::MFCC_COEFFS;
+        let m20_header: Vec<String> = (1..=n20).map(|i| format!("m20_{i}")).collect();
+        let s20_header: Vec<String> = (1..=n20).map(|i| format!("s20_{i}")).collect();
+        let h1_header: Vec<String> = (1..=n13).map(|i| format!("h1_{i}")).collect();
+        let h2_header: Vec<String> = (1..=n13).map(|i| format!("h2_{i}")).collect();
+        let mut csv_out = format!(
+            "participant,avp_raw,truth,pred,centroid,zcr,low,mid,high,peak,crest,{},{},{},{}\n",
+            m20_header.join(","),
+            s20_header.join(","),
+            h1_header.join(","),
+            h2_header.join(",")
+        );
+        let mut cache: HashMap<PathBuf, AudioData> = HashMap::new();
+        for (it, f) in items.iter().zip(feats.iter()) {
+            if !cache.contains_key(&it.wav_path) {
+                let bytes = std::fs::read(&it.wav_path)
+                    .map_err(|e| format!("cannot read {}: {e}", it.wav_path.display()))?;
+                let audio = audio::ingest_wav(&bytes)
+                    .map_err(|e| format!("cannot decode {}: {e}", it.wav_path.display()))?;
+                cache.insert(it.wav_path.clone(), audio);
+            }
+            let audio = &cache[&it.wav_path];
+            let start = ((it.onset_ms / 1000.0) * audio.sample_rate as f64) as usize;
+            let dur = ((args.window_ms / 1000.0) * audio.sample_rate as f64) as usize;
+            let mono = audio.to_mono();
+            let end = (start + dur).min(mono.len());
+            let seg: &[f32] = if start < mono.len() && start < end {
+                &mono[start..end]
+            } else {
+                &[]
+            };
+            let (m20, s20) = audio::extract_mfcc_stats(seg, audio.sample_rate, n20);
+            let mid = seg.len() / 2;
+            let h1 = audio::extract_mfcc(&seg[..mid.min(seg.len())], audio.sample_rate);
+            let h2 = audio::extract_mfcc(&seg[mid.min(seg.len())..], audio.sample_rate);
+            let join = |v: &[f32]| {
+                v.iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            let pred = heuristic.classify(f).class;
+            csv_out.push_str(&format!(
+                "{},{},{:?},{:?},{},{},{},{},{},{},{},{},{},{},{}\n",
+                it.participant,
+                it.avp_raw,
+                it.label,
+                pred,
+                f.spectral_centroid,
+                f.zcr,
+                f.low_band_energy,
+                f.mid_band_energy,
+                f.high_band_energy,
+                f.peak_amplitude,
+                f.crest_factor,
+                join(&m20),
+                join(&s20),
+                join(&h1),
+                join(&h2),
+            ));
+        }
+        std::fs::write(dump_path, csv_out)
+            .map_err(|e| format!("cannot write features to {}: {e}", dump_path.display()))?;
+        println!("Dumped per-item features to {}", dump_path.display());
+    }
 
     println!("Running heuristic + calibrated passes ...");
     let (heur, calib, open_hat_eval) = run_passes(&items, &feats, args.calib_per_class);
+
+    println!("Running Gaussian LOPO passes (28 fits) ...");
+    let mfcc_means: Vec<Vec<f32>> = mfccs.iter().map(|(mean, _)| mean.clone()).collect();
+    let (gauss_agn, gauss_ada) =
+        run_gaussian_passes(&items, &feats, &mfcc_means, &gfeats, args.calib_per_class);
+
+    if let Some(model_path) = &args.fit_model {
+        // The shipping artifact: fitted on ALL participants (LOPO above is the
+        // honest accuracy estimate for exactly this construction).
+        let train: Vec<(EventClass, Vec<f32>)> = items
+            .iter()
+            .zip(gfeats.iter())
+            .map(|(it, v)| (it.label, v.clone()))
+            .collect();
+        let model = GaussianModel::fit(&train)
+            .ok_or("cannot fit factory model: empty or inconsistent training data")?;
+        let json = model
+            .to_json()
+            .map_err(|e| format!("cannot serialize factory model: {e}"))?;
+        std::fs::write(model_path, &json)
+            .map_err(|e| format!("cannot write model to {}: {e}", model_path.display()))?;
+        println!(
+            "Wrote factory Gaussian model ({} classes, {} dims, {} bytes) to {}",
+            model.classes.len(),
+            model.z_mean.len(),
+            json.len(),
+            model_path.display()
+        );
+    }
 
     let report = build_report(
         &args.dataset,
@@ -653,6 +917,8 @@ fn run() -> Result<(), String> {
         args.window_ms,
         &heur,
         &calib,
+        &gauss_agn,
+        &gauss_ada,
     );
 
     // Print the tables to stdout (skip the leading "# AVP Benchmark Results").

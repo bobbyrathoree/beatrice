@@ -537,6 +537,164 @@ fn pick_onset_peaks(
     onsets
 }
 
+/// Number of MFCC coefficients produced by [`extract_mfcc`] (c1..c20; c0 —
+/// overall log-energy — is dropped so the vector is recording-level invariant).
+/// 20 coefficients beat 13 on AVP leave-one-participant-out CV (81.6% vs
+/// 80.8% for the Gaussian classifier) — the extra coefficients carry the
+/// fine spectral envelope that separates snare from hi-hat imitations.
+pub const MFCC_COEFFS: usize = 20;
+
+/// Number of triangular mel filters in the MFCC filterbank.
+const MFCC_MEL_FILTERS: usize = 40;
+
+/// MFCC frame length in samples (~23 ms at 44.1 kHz) and hop (50% overlap).
+const MFCC_FRAME: usize = 1024;
+const MFCC_HOP: usize = 512;
+
+/// Hz → mel (HTK formula).
+fn hz_to_mel(hz: f32) -> f32 {
+    2595.0 * (1.0 + hz / 700.0).log10()
+}
+
+/// mel → Hz (HTK formula).
+fn mel_to_hz(mel: f32) -> f32 {
+    700.0 * (10.0f32.powf(mel / 2595.0) - 1.0)
+}
+
+/// Extract mean MFCCs (c1..c13) over an audio segment.
+///
+/// Classic "bag of frames" timbre descriptor: the segment is cut into ~23 ms
+/// Hann-windowed frames (50% overlap), each frame's power spectrum is pooled
+/// through a 40-filter mel filterbank, log-compressed, and DCT-II'd; the
+/// per-frame coefficient vectors are then averaged. c0 (overall energy) is
+/// dropped so the result does not depend on recording level — this is the
+/// published recipe behind classical MFCC + kNN vocal-percussion classifiers.
+///
+/// Returns a zero vector for empty input (mirrors [`EventFeatures::zero`]).
+pub fn extract_mfcc(samples: &[f32], sample_rate: u32) -> Vec<f32> {
+    extract_mfcc_stats(samples, sample_rate, MFCC_COEFFS).0
+}
+
+/// Full MFCC statistics: per-coefficient (mean, standard deviation) across the
+/// segment's frames, for the first `n_coeffs` coefficients (c1..cN, c0 dropped).
+/// The std vector captures temporal dynamics that the mean flattens.
+pub fn extract_mfcc_stats(
+    samples: &[f32],
+    sample_rate: u32,
+    n_coeffs: usize,
+) -> (Vec<f32>, Vec<f32>) {
+    if samples.is_empty() || sample_rate == 0 || n_coeffs == 0 {
+        return (vec![0.0; n_coeffs], vec![0.0; n_coeffs]);
+    }
+
+    // Precompute the mel filterbank for this frame size / sample rate.
+    // Filter edges are MFCC_MEL_FILTERS + 2 points evenly spaced in mel
+    // from 0 to Nyquist.
+    let n_bins = MFCC_FRAME / 2 + 1;
+    let bin_width = sample_rate as f32 / MFCC_FRAME as f32;
+    let mel_max = hz_to_mel(sample_rate as f32 / 2.0);
+    let edges: Vec<f32> = (0..MFCC_MEL_FILTERS + 2)
+        .map(|i| mel_to_hz(mel_max * i as f32 / (MFCC_MEL_FILTERS + 1) as f32))
+        .collect();
+
+    let mut sum_coeffs = vec![0.0f64; n_coeffs];
+    let mut sumsq_coeffs = vec![0.0f64; n_coeffs];
+    let mut n_frames = 0usize;
+
+    let mut start = 0;
+    loop {
+        // Zero-pad the final partial frame so short segments still yield MFCCs.
+        let mut frame = vec![0.0f32; MFCC_FRAME];
+        let end = (start + MFCC_FRAME).min(samples.len());
+        if start >= samples.len() {
+            break;
+        }
+        frame[..end - start].copy_from_slice(&samples[start..end]);
+
+        apply_hann_window(&mut frame);
+        let spectrum = compute_fft(&frame);
+
+        // Pool the power spectrum through the triangular mel filters.
+        let mut filter_energies = vec![0.0f32; MFCC_MEL_FILTERS];
+        for (m, energy) in filter_energies.iter_mut().enumerate() {
+            let (f_lo, f_c, f_hi) = (edges[m], edges[m + 1], edges[m + 2]);
+            let bin_lo = (f_lo / bin_width).floor() as usize;
+            let bin_hi = ((f_hi / bin_width).ceil() as usize).min(n_bins - 1);
+            for bin in bin_lo..=bin_hi {
+                let f = bin as f32 * bin_width;
+                let weight = if f <= f_c {
+                    if f_c > f_lo { (f - f_lo) / (f_c - f_lo) } else { 0.0 }
+                } else if f_hi > f_c {
+                    (f_hi - f) / (f_hi - f_c)
+                } else {
+                    0.0
+                };
+                if weight > 0.0 {
+                    let mag = spectrum[bin];
+                    *energy += weight * mag * mag;
+                }
+            }
+        }
+
+        // Log-compress and DCT-II; keep c1..c13 (drop level-dependent c0).
+        // The log floor is RELATIVE to the frame's peak filter energy (80 dB
+        // below it): an absolute floor would pin near-silent filters while a
+        // gain change shifts the rest, leaking level into c1+ and breaking the
+        // level invariance that dropping c0 is supposed to buy.
+        let peak_energy = filter_energies.iter().cloned().fold(0.0f32, f32::max);
+        let floor = (peak_energy * 1e-8).max(f32::MIN_POSITIVE);
+        let log_energies: Vec<f32> =
+            filter_energies.iter().map(|&e| e.max(floor).ln()).collect();
+        let n = MFCC_MEL_FILTERS as f32;
+        for k in 0..n_coeffs {
+            let mut c = 0.0f32;
+            for (i, &le) in log_energies.iter().enumerate() {
+                c += le
+                    * (std::f32::consts::PI * (k + 1) as f32 * (i as f32 + 0.5) / n).cos();
+            }
+            sum_coeffs[k] += c as f64;
+            sumsq_coeffs[k] += (c as f64) * (c as f64);
+        }
+        n_frames += 1;
+
+        if end >= samples.len() {
+            break;
+        }
+        start += MFCC_HOP;
+    }
+
+    if n_frames == 0 {
+        return (vec![0.0; n_coeffs], vec![0.0; n_coeffs]);
+    }
+    let nf = n_frames as f64;
+    let means: Vec<f32> = sum_coeffs.iter().map(|&s| (s / nf) as f32).collect();
+    let stds: Vec<f32> = sum_coeffs
+        .iter()
+        .zip(sumsq_coeffs.iter())
+        .map(|(&s, &ss)| {
+            let mean = s / nf;
+            ((ss / nf - mean * mean).max(0.0)).sqrt() as f32
+        })
+        .collect();
+    (means, stds)
+}
+
+/// Extract mean MFCCs for a specific time window of decoded audio
+/// (the MFCC counterpart of [`extract_features_for_window`]).
+pub fn extract_mfcc_for_window(audio: &AudioData, start_ms: f64, duration_ms: f64) -> Vec<f32> {
+    let start_sample = ((start_ms / 1000.0) * audio.sample_rate as f64) as usize;
+    let duration_samples = ((duration_ms / 1000.0) * audio.sample_rate as f64) as usize;
+
+    let mono = audio.to_mono();
+    let end_sample = (start_sample + duration_samples).min(mono.len());
+
+    if start_sample >= mono.len() || start_sample >= end_sample {
+        return vec![0.0; MFCC_COEFFS];
+    }
+
+    extract_mfcc(&mono[start_sample..end_sample], audio.sample_rate)
+}
+
 /// Extract features for a specific time window
 /// Used to analyze audio around a detected onset
 pub fn extract_features_for_window(
@@ -591,6 +749,69 @@ mod tests {
         let features = extract_features(&[], 44100);
         assert_eq!(features.zcr, 0.0);
         assert_eq!(features.spectral_centroid, 0.0);
+    }
+
+    #[test]
+    fn test_mfcc_empty_input() {
+        let mfcc = extract_mfcc(&[], 44100);
+        assert_eq!(mfcc.len(), MFCC_COEFFS);
+        assert!(mfcc.iter().all(|&c| c == 0.0));
+    }
+
+    #[test]
+    fn test_mfcc_length_and_finiteness() {
+        // 100ms of a 440Hz sine
+        let sr = 44100u32;
+        let samples: Vec<f32> = (0..4410)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sr as f32).sin() * 0.5)
+            .collect();
+        let mfcc = extract_mfcc(&samples, sr);
+        assert_eq!(mfcc.len(), MFCC_COEFFS);
+        assert!(mfcc.iter().all(|c| c.is_finite()));
+        // A pure tone must produce non-trivial coefficients
+        assert!(mfcc.iter().any(|&c| c.abs() > 0.01));
+    }
+
+    #[test]
+    fn test_mfcc_discriminates_tone_from_noise() {
+        // MFCCs of a low sine and of white-ish noise must differ substantially —
+        // that separation is the whole reason the calibration kNN uses them.
+        let sr = 44100u32;
+        let tone: Vec<f32> = (0..4410)
+            .map(|i| (2.0 * std::f32::consts::PI * 200.0 * i as f32 / sr as f32).sin() * 0.5)
+            .collect();
+        // Deterministic pseudo-noise (LCG) — no rand dep.
+        let mut state = 12345u64;
+        let noise: Vec<f32> = (0..4410)
+            .map(|_| {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                ((state >> 33) as f32 / (u32::MAX >> 1) as f32) - 1.0
+            })
+            .collect();
+        let m_tone = extract_mfcc(&tone, sr);
+        let m_noise = extract_mfcc(&noise, sr);
+        let dist: f32 = m_tone
+            .iter()
+            .zip(m_noise.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f32>()
+            .sqrt();
+        assert!(dist > 1.0, "tone/noise MFCC distance too small: {dist}");
+    }
+
+    #[test]
+    fn test_mfcc_level_invariance() {
+        // Dropping c0 should make MFCCs (nearly) invariant to gain changes.
+        let sr = 44100u32;
+        let quiet: Vec<f32> = (0..4410)
+            .map(|i| (2.0 * std::f32::consts::PI * 300.0 * i as f32 / sr as f32).sin() * 0.05)
+            .collect();
+        let loud: Vec<f32> = quiet.iter().map(|s| s * 10.0).collect();
+        let m_q = extract_mfcc(&quiet, sr);
+        let m_l = extract_mfcc(&loud, sr);
+        for (a, b) in m_q.iter().zip(m_l.iter()) {
+            assert!((a - b).abs() < 0.15, "gain changed MFCC: {a} vs {b}");
+        }
     }
 
     #[test]
