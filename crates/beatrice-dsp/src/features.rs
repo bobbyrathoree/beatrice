@@ -615,12 +615,17 @@ pub fn extract_mfcc_stats(
         let spectrum = compute_fft(&frame);
 
         // Pool the power spectrum through the triangular mel filters.
-        let mut filter_energies = vec![0.0f32; MFCC_MEL_FILTERS];
+        let mut filter_energies = [0.0f32; MFCC_MEL_FILTERS];
         for (m, energy) in filter_energies.iter_mut().enumerate() {
             let (f_lo, f_c, f_hi) = (edges[m], edges[m + 1], edges[m + 2]);
             let bin_lo = (f_lo / bin_width).floor() as usize;
             let bin_hi = ((f_hi / bin_width).ceil() as usize).min(n_bins - 1);
-            for bin in bin_lo..=bin_hi {
+            for (bin, &mag) in spectrum
+                .iter()
+                .enumerate()
+                .take(bin_hi + 1)
+                .skip(bin_lo)
+            {
                 let f = bin as f32 * bin_width;
                 let weight = if f <= f_c {
                     if f_c > f_lo { (f - f_lo) / (f_c - f_lo) } else { 0.0 }
@@ -630,7 +635,6 @@ pub fn extract_mfcc_stats(
                     0.0
                 };
                 if weight > 0.0 {
-                    let mag = spectrum[bin];
                     *energy += weight * mag * mag;
                 }
             }

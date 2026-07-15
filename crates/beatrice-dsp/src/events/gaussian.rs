@@ -192,9 +192,9 @@ impl GaussianModel {
         let mut lls: Vec<f32> = Vec::with_capacity(self.classes.len());
         for k in 0..self.classes.len() {
             let mut ll = self.log_priors[k];
-            for i in 0..z.len().min(self.means[k].len()) {
-                let d = z[i] - self.means[k][i];
-                ll -= 0.5 * (d * d / self.vars[k][i] + self.vars[k][i].ln());
+            for ((zi, mi), vi) in z.iter().zip(&self.means[k]).zip(&self.vars[k]) {
+                let d = zi - mi;
+                ll -= 0.5 * (d * d / vi + vi.ln());
             }
             lls.push(ll);
         }
@@ -243,13 +243,15 @@ impl GaussianModel {
             let dims = self.means[k].len();
             let mut user_mean = vec![0.0f32; dims];
             for u in &user {
-                for i in 0..dims.min(u.len()) {
-                    user_mean[i] += u[i] / n;
+                for (um, ui) in user_mean.iter_mut().zip(u) {
+                    *um += ui / n;
                 }
             }
-            for i in 0..dims {
-                adapted.means[k][i] =
-                    (n * user_mean[i] + tau * self.means[k][i]) / (n + tau);
+            for (am, (um, fm)) in adapted.means[k]
+                .iter_mut()
+                .zip(user_mean.iter().zip(&self.means[k]))
+            {
+                *am = (n * um + tau * fm) / (n + tau);
             }
         }
         adapted

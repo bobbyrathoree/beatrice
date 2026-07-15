@@ -10,22 +10,24 @@
 //     - tMs      : onset's estimated time relative to STREAM START
 //     - classId  : EventClass id (0=kick, 1=hihat, 2=snare/click, 3=hum)
 //     - conf     : classification confidence [0,1]
-//     - features : [centroid, zcr, low, mid, high, peak, crest] — the 7-float
-//                  EventFeatures vector, forwarded so the calibration panel can
-//                  echo a detected event straight back as a labeled sample
+//     - features : [centroid, zcr, low, mid, high, peak, crest, mfcc1..mfcc20]
+//                  — the 7-float EventFeatures vector followed by the window's
+//                  20 mean MFCCs, forwarded so the calibration panel can echo a
+//                  detected event straight back as a labeled sample
 //                  ({type:"calibrate"}) without re-deriving features.
 //
 // INBOUND (main -> worklet):
 //   { type: "wasm", bytes }              compile+instantiate the detector
 //   { type: "calibrate", classId, features }
 //                                        add a labeled few-shot sample (Task 5)
-//   { type: "setCalibration", enabled }  flip the HEURISTIC/YOURS A/B toggle
+//   { type: "setCalibration", enabled }  flip the FACTORY/YOURS A/B toggle
 //   { type: "resetCalibration" }         drop the live profile before a re-teach
 //                                        (so new samples don't append onto a
-//                                        re-seeded profile — kNN reverts to None)
+//                                        re-seeded profile — the model reverts
+//                                        to factory until the profile refills)
 //
-// WASM push() ABI: a flat Float32Array of EVENT_STRIDE (10) floats per event —
-//   [tMs, classId, conf, centroid, zcr, low, mid, high, peak, crest]
+// WASM push() ABI: a flat Float32Array of EVENT_STRIDE (30) floats per event —
+//   [tMs, classId, conf, centroid, zcr, low, mid, high, peak, crest, mfcc1..20]
 // JSON-free, no serde on the render thread. Empty means "no event this quantum".
 // EVENT_STRIDE and the feature order MUST match crates/beatrice-dsp/src/lib.rs
 // (WASM_EVENT_STRIDE + WasmDetector::push); bump both in lockstep.
@@ -51,8 +53,9 @@
 import "./textcodec-polyfill";
 import { initSync, WasmDetector } from "../../crates/beatrice-dsp/pkg/beatrice_dsp";
 
-/** Floats per event record in the push() ABI (see crate WASM_EVENT_STRIDE). */
-const EVENT_STRIDE = 10;
+/** Floats per event record in the push() ABI (see crate WASM_EVENT_STRIDE):
+ * 3 header floats + 7 EventFeatures + 20 MFCCs. */
+const EVENT_STRIDE = 30;
 
 interface WasmMessage {
   type: "wasm";
@@ -98,11 +101,11 @@ class DetectorProcessor extends AudioWorkletProcessor {
             : new Float32Array(msg.features)
         );
       } else if (msg.type === "setCalibration") {
-        // A/B toggle: kNN-first (personal) vs heuristic-only.
+        // A/B toggle: MAP-adapted (personal) vs factory model.
         this.det?.set_calibration_enabled(!!msg.enabled);
       } else if (msg.type === "resetCalibration") {
         // Re-teach begins: drop any re-seeded profile so fresh samples don't
-        // append onto it (kNN reverts to None until the new profile refills).
+        // append onto it (reverts to factory until the new profile refills).
         this.det?.clear_calibration();
       }
     };
@@ -126,15 +129,9 @@ class DetectorProcessor extends AudioWorkletProcessor {
         tMs: recs[i],
         classId: recs[i + 1],
         conf: recs[i + 2],
-        features: [
-          recs[i + 3],
-          recs[i + 4],
-          recs[i + 5],
-          recs[i + 6],
-          recs[i + 7],
-          recs[i + 8],
-          recs[i + 9],
-        ],
+        // 7 EventFeatures + 20 MFCCs — everything after the 3 header floats,
+        // in ABI order, so a calibration echo-back round-trips losslessly.
+        features: Array.from(recs.slice(i + 3, i + EVENT_STRIDE)),
       });
     }
     return true;

@@ -7,20 +7,22 @@
  * # ABI (JSON-free, no serde in the hot path)
  *
  * [`push`](Self::push) returns a flat `Float32Array` of [`WASM_EVENT_STRIDE`]
- * (10) floats per event: `[t_ms, class_id, confidence, centroid, zcr,
- * low_band, mid_band, high_band, peak, crest]`. An empty array means "no event
- * this quantum" (the common case). The length is always a multiple of 10.
- * `class_id` is [`class_id`]'s mapping; the trailing 7 floats are the event's
- * [`EventFeatures`] in struct-declaration order. The worklet reads the records
- * and posts one `{ type: "event", tMs, classId, conf, features }` message per
- * event. The features let the calibration panel echo a detected event back via
+ * (30) floats per event: `[t_ms, class_id, confidence, centroid, zcr,
+ * low_band, mid_band, high_band, peak, crest, mfcc1..mfcc20]`. An empty array
+ * means "no event this quantum" (the common case). The length is always a
+ * multiple of the stride. `class_id` is [`class_id`]'s mapping; floats 3..10
+ * are the event's [`EventFeatures`] in struct-declaration order and floats
+ * 10..30 the classification window's mean MFCCs. The worklet reads the
+ * records and posts one `{ type: "event", tMs, classId, conf, features }`
+ * message per event (features = all 27 trailing floats). The features let the
+ * calibration panel echo a detected event back via
  * [`add_calibration_sample`](Self::add_calibration_sample) as a labeled sample.
  *
  * # Calibration (Task 5, few-shot personalization)
  *
  * [`add_calibration_sample`](Self::add_calibration_sample) feeds a labeled
  * example into the live profile; [`set_calibration_enabled`](Self::set_calibration_enabled)
- * flips the HEURISTIC/YOURS A/B toggle. Both are cheap main→worklet messages.
+ * flips the FACTORY/YOURS A/B toggle. Both are cheap main→worklet messages.
  */
 export class WasmDetector {
     __destroy_into_raw() {
@@ -36,8 +38,9 @@ export class WasmDetector {
     /**
      * Add a labeled calibration sample from the main thread. `class_id` is the
      * [`class_id`] mapping (0=kick, 1=hihat, 2=snare/click, 3=hum); `features`
-     * is the 7-float [`EventFeatures`] vector (same order as the trailing floats
-     * in [`push`](Self::push)). Short/garbled feature slices are ignored so a
+     * is the 27-float `[EventFeatures 7, mfcc 20]` vector (same order as the
+     * trailing floats in [`push`](Self::push)). A legacy 7-float slice still
+     * works (MFCCs default to zero); shorter/garbled slices are ignored so a
      * malformed message can never poison the profile.
      * @param {number} class_id
      * @param {Float32Array} features
@@ -100,8 +103,8 @@ export class WasmDetector {
         return v2;
     }
     /**
-     * Flip the HEURISTIC/YOURS A/B toggle. `true` = personal (kNN-first once the
-     * profile is sufficient); `false` = heuristic-only.
+     * Flip the FACTORY/YOURS A/B toggle. `true` = personal (MAP-adapted once
+     * the profile is sufficient); `false` = factory model.
      * @param {boolean} enabled
      */
     set_calibration_enabled(enabled) {

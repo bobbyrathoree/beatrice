@@ -39,9 +39,10 @@ export interface JamLiveEvent {
   /** classification confidence [0,1] */
   conf: number;
   /**
-   * The event's 7-float EventFeatures vector
-   * ([centroid, zcr, low, mid, high, peak, crest]). Forwarded by the worklet so
-   * the calibration panel can echo a detected event back as a labeled sample.
+   * The event's 27-float feature vector
+   * ([centroid, zcr, low, mid, high, peak, crest, mfcc1..mfcc20]). Forwarded by
+   * the worklet so the calibration panel can echo a detected event back as a
+   * labeled sample.
    */
   features: number[];
 }
@@ -75,10 +76,10 @@ export interface JamSession {
   capture: () => Promise<Uint8Array>;
   /**
    * Teach the live detector one labeled sample (Task 5 few-shot calibration).
-   * `features` is the event's 7-float EventFeatures vector.
+   * `features` is the event's 27-float [EventFeatures 7, mfcc 20] vector.
    */
   addCalibrationSample: (classId: JamClassId, features: number[]) => void;
-  /** Flip the HEURISTIC/YOURS A/B toggle on the live detector. */
+  /** Flip the FACTORY/YOURS A/B toggle on the live detector. */
   setCalibrationEnabled: (enabled: boolean) => void;
   /**
    * Drop the live detector's calibration profile (kNN reverts to heuristic).

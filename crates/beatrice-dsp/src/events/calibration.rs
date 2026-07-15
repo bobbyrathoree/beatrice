@@ -24,6 +24,13 @@ pub struct CalibrationSample {
     /// Sample rate of the raw window
     pub sample_rate: u32,
 
+    /// Mean MFCCs (c1..c20) of the sample's feature window, used by the
+    /// Gaussian model's MAP adaptation. `serde(default)` so profiles persisted
+    /// before this field existed still load (they adapt from scalar features
+    /// only if empty — see `gaussian_vec`).
+    #[serde(default)]
+    pub mfcc: Vec<f32>,
+
     /// Optional user notes about this sample
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
@@ -37,11 +44,38 @@ impl CalibrationSample {
         raw_window: Vec<f32>,
         sample_rate: u32,
     ) -> Self {
+        // Derive MFCCs from the raw window when present so the Gaussian
+        // MAP adaptation has the full feature vector to work with.
+        let mfcc = if raw_window.is_empty() {
+            Vec::new()
+        } else {
+            crate::features::extract_mfcc(&raw_window, sample_rate)
+        };
         CalibrationSample {
             class,
             features,
             raw_window,
             sample_rate,
+            mfcc,
+            notes: None,
+        }
+    }
+
+    /// Create a sample with an explicit MFCC vector (when the caller already
+    /// extracted it, e.g. the streaming detector's classification window).
+    pub fn with_mfcc(
+        class: EventClass,
+        features: EventFeatures,
+        mfcc: Vec<f32>,
+        raw_window: Vec<f32>,
+        sample_rate: u32,
+    ) -> Self {
+        CalibrationSample {
+            class,
+            features,
+            raw_window,
+            sample_rate,
+            mfcc,
             notes: None,
         }
     }
@@ -54,13 +88,16 @@ impl CalibrationSample {
         sample_rate: u32,
         notes: String,
     ) -> Self {
-        CalibrationSample {
-            class,
-            features,
-            raw_window,
-            sample_rate,
-            notes: Some(notes),
-        }
+        let mut s = Self::new(class, features, raw_window, sample_rate);
+        s.notes = Some(notes);
+        s
+    }
+
+    /// The sample's feature vector for the Gaussian model
+    /// ([`crate::events::gaussian::gaussian_features`] layout). Zero-pads the
+    /// MFCC block for legacy samples persisted without MFCCs.
+    pub fn gaussian_vec(&self) -> Vec<f32> {
+        crate::events::gaussian::gaussian_features(&self.features, &self.mfcc)
     }
 }
 

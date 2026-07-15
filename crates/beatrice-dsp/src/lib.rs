@@ -64,6 +64,54 @@ pub fn analyze_offline(audio: &AudioData, cfg: &OnsetConfig) -> Vec<Event> {
     events
 }
 
+/// Run the offline analysis pipeline with the [`HybridClassifier`] (the
+/// AVP-fitted Gaussian MFCC model + heuristic hum gate) — the app's shipping
+/// classification path since the AVP benchmark showed it at 81.6%
+/// participant-wise vs 65.8% for the pure heuristic.
+///
+/// Same onset/duration/feature logic as [`analyze_offline`]; classification
+/// additionally extracts MFCCs over a fixed
+/// [`events::hybrid::HYBRID_MFCC_WINDOW_MS`] window (matching the window the
+/// factory model was fitted with). [`analyze_offline`] (heuristic) remains for
+/// the golden freeze tests, which pin the extraction refactor.
+pub fn analyze_offline_hybrid(
+    audio: &AudioData,
+    cfg: &OnsetConfig,
+    classifier: &HybridClassifier,
+) -> Vec<Event> {
+    let onsets = detect_onsets(audio, cfg);
+    let mono = audio.to_mono();
+    let mut events = Vec::with_capacity(onsets.len());
+
+    for (i, onset) in onsets.iter().enumerate() {
+        let duration_ms = if i + 1 < onsets.len() {
+            onsets[i + 1].timestamp_ms - onset.timestamp_ms
+        } else {
+            audio.duration_ms as f64 - onset.timestamp_ms
+        };
+        let window_duration_ms = duration_ms.clamp(50.0, 500.0);
+        let features = extract_features_for_window(audio, onset.timestamp_ms, window_duration_ms);
+
+        let start = ((onset.timestamp_ms / 1000.0) * audio.sample_rate as f64) as usize;
+        let mfcc_len = ((events::hybrid::HYBRID_MFCC_WINDOW_MS / 1000.0)
+            * audio.sample_rate as f64) as usize;
+        let end = (start + mfcc_len).min(mono.len());
+        let mfcc = if start < end {
+            extract_mfcc(&mono[start..end], audio.sample_rate)
+        } else {
+            vec![0.0; MFCC_COEFFS]
+        };
+
+        let result = classifier.classify(&features, &mfcc);
+        events.push(
+            Event::new(onset.timestamp_ms, duration_ms, result.class, result.confidence, features)
+                .with_scores(result.class_scores()),
+        );
+    }
+
+    events
+}
+
 /// Stable numeric id for an [`EventClass`], for the JSON-free WASM ABI.
 ///
 /// Matches the enum declaration order and the frontend `tauri-mock` convention
@@ -83,13 +131,15 @@ pub fn class_id(class: EventClass) -> f32 {
 use wasm_bindgen::prelude::*;
 
 /// Number of `f32`s per event record in the [`WasmDetector::push`] ABI:
-/// `[t_ms, class_id, confidence, centroid, zcr, low, mid, high, peak, crest]`.
-/// The 7 trailing floats are the [`EventFeatures`], forwarded so the main
-/// thread can send a detected event back as a labeled calibration sample
-/// without re-deriving features. The worklet decodes in strides of this size,
-/// so it is part of the ABI contract — bump it in lockstep on both sides.
+/// `[t_ms, class_id, confidence, centroid, zcr, low, mid, high, peak, crest,
+/// mfcc1..mfcc20]`. Floats 3..10 are the [`EventFeatures`] and 10..30 the mean
+/// MFCCs of the classification window, forwarded so the main thread can send a
+/// detected event back as a labeled calibration sample without re-deriving
+/// features. The worklet decodes in strides of this size, so it is part of the
+/// ABI contract — bump it in lockstep on both sides
+/// (`src/worklet/detector.worklet.ts` EVENT_STRIDE).
 #[cfg(feature = "wasm")]
-pub const WASM_EVENT_STRIDE: usize = 10;
+pub const WASM_EVENT_STRIDE: usize = 10 + crate::features::MFCC_COEFFS;
 
 /// WASM surface over the causal [`StreamingDetector`], driven by the
 /// AudioWorklet one render quantum at a time.
@@ -97,20 +147,22 @@ pub const WASM_EVENT_STRIDE: usize = 10;
 /// # ABI (JSON-free, no serde in the hot path)
 ///
 /// [`push`](Self::push) returns a flat `Float32Array` of [`WASM_EVENT_STRIDE`]
-/// (10) floats per event: `[t_ms, class_id, confidence, centroid, zcr,
-/// low_band, mid_band, high_band, peak, crest]`. An empty array means "no event
-/// this quantum" (the common case). The length is always a multiple of 10.
-/// `class_id` is [`class_id`]'s mapping; the trailing 7 floats are the event's
-/// [`EventFeatures`] in struct-declaration order. The worklet reads the records
-/// and posts one `{ type: "event", tMs, classId, conf, features }` message per
-/// event. The features let the calibration panel echo a detected event back via
+/// (30) floats per event: `[t_ms, class_id, confidence, centroid, zcr,
+/// low_band, mid_band, high_band, peak, crest, mfcc1..mfcc20]`. An empty array
+/// means "no event this quantum" (the common case). The length is always a
+/// multiple of the stride. `class_id` is [`class_id`]'s mapping; floats 3..10
+/// are the event's [`EventFeatures`] in struct-declaration order and floats
+/// 10..30 the classification window's mean MFCCs. The worklet reads the
+/// records and posts one `{ type: "event", tMs, classId, conf, features }`
+/// message per event (features = all 27 trailing floats). The features let the
+/// calibration panel echo a detected event back via
 /// [`add_calibration_sample`](Self::add_calibration_sample) as a labeled sample.
 ///
 /// # Calibration (Task 5, few-shot personalization)
 ///
 /// [`add_calibration_sample`](Self::add_calibration_sample) feeds a labeled
 /// example into the live profile; [`set_calibration_enabled`](Self::set_calibration_enabled)
-/// flips the HEURISTIC/YOURS A/B toggle. Both are cheap main→worklet messages.
+/// flips the FACTORY/YOURS A/B toggle. Both are cheap main→worklet messages.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub struct WasmDetector(StreamingDetector);
@@ -140,14 +192,18 @@ impl WasmDetector {
             out.push(f.high_band_energy);
             out.push(f.peak_amplitude);
             out.push(f.crest_factor);
+            for i in 0..crate::features::MFCC_COEFFS {
+                out.push(e.mfcc.get(i).copied().unwrap_or(0.0));
+            }
         }
         out
     }
 
     /// Add a labeled calibration sample from the main thread. `class_id` is the
     /// [`class_id`] mapping (0=kick, 1=hihat, 2=snare/click, 3=hum); `features`
-    /// is the 7-float [`EventFeatures`] vector (same order as the trailing floats
-    /// in [`push`](Self::push)). Short/garbled feature slices are ignored so a
+    /// is the 27-float `[EventFeatures 7, mfcc 20]` vector (same order as the
+    /// trailing floats in [`push`](Self::push)). A legacy 7-float slice still
+    /// works (MFCCs default to zero); shorter/garbled slices are ignored so a
     /// malformed message can never poison the profile.
     pub fn add_calibration_sample(&mut self, class_id: u32, features: &[f32]) {
         if features.len() < 7 {
@@ -163,18 +219,23 @@ impl WasmDetector {
             peak_amplitude: features[5],
             crest_factor: features[6],
         };
+        let mfcc: Vec<f32> = features
+            .get(7..7 + crate::features::MFCC_COEFFS)
+            .map(|s| s.to_vec())
+            .unwrap_or_default();
         // raw_window empty: the live path stores features only (the offline
         // pipeline re-derives features from audio; live samples never train ML).
-        self.0.add_calibration_sample(CalibrationSample::new(
+        self.0.add_calibration_sample(CalibrationSample::with_mfcc(
             class,
             feats,
+            mfcc,
             Vec::new(),
             self.0.sample_rate(),
         ));
     }
 
-    /// Flip the HEURISTIC/YOURS A/B toggle. `true` = personal (kNN-first once the
-    /// profile is sufficient); `false` = heuristic-only.
+    /// Flip the FACTORY/YOURS A/B toggle. `true` = personal (MAP-adapted once
+    /// the profile is sufficient); `false` = factory model.
     pub fn set_calibration_enabled(&mut self, enabled: bool) {
         self.0.set_calibration_enabled(enabled);
     }

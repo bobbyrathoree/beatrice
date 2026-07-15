@@ -21,6 +21,13 @@ use crate::events::types::{EventClass, EventFeatures};
 pub const HUM_GATE_MAX_CREST: f32 = 2.2;
 pub const HUM_GATE_MAX_ZCR: f32 = 0.15;
 
+/// MFCC extraction window (ms) for the Gaussian model. MUST match the window
+/// the factory model was fitted with (`benchmark` default `--window-ms 150`):
+/// the model learned the timbre statistics of 150 ms onset windows, and a
+/// dynamic event window (up to 500 ms of mostly decay/silence) dilutes the
+/// MFCC mean away from that training distribution.
+pub const HYBRID_MFCC_WINDOW_MS: f64 = 150.0;
+
 /// Gaussian-first classifier with a heuristic gate for sustained signals.
 pub struct HybridClassifier {
     gaussian: GaussianModel,
@@ -134,14 +141,14 @@ mod tests {
     #[test]
     fn sustained_signals_route_to_hum() {
         let clf = HybridClassifier::factory();
-        let result = clf.classify(&sustained_hum_features(), &vec![0.0; 20]);
+        let result = clf.classify(&sustained_hum_features(), &[0.0; 20]);
         assert_eq!(result.class, EventClass::HumVoiced);
     }
 
     #[test]
     fn transients_never_classify_as_hum() {
         let clf = HybridClassifier::factory();
-        let result = clf.classify(&transient_features(), &vec![0.0; 20]);
+        let result = clf.classify(&transient_features(), &[0.0; 20]);
         assert_ne!(result.class, EventClass::HumVoiced);
         // Gaussian branch: hum slot is exactly 0.
         let hum_score = result
@@ -156,7 +163,7 @@ mod tests {
     #[test]
     fn gaussian_branch_scores_sum_to_one() {
         let clf = HybridClassifier::factory();
-        let result = clf.classify(&transient_features(), &vec![0.0; 20]);
+        let result = clf.classify(&transient_features(), &[0.0; 20]);
         let total: f32 = result.all_scores.iter().map(|(_, s)| s).sum();
         assert!((total - 1.0).abs() < 1e-3, "scores sum to {total}");
         assert!(result.confidence > 0.0 && result.confidence <= 1.0);
@@ -170,7 +177,7 @@ mod tests {
             .map(|_| (EventClass::BilabialPlosive, vec![1.0; 22]))
             .collect();
         let clf = HybridClassifier::with_adaptation(&samples);
-        let result = clf.classify(&transient_features(), &vec![0.0; 20]);
+        let result = clf.classify(&transient_features(), &[0.0; 20]);
         assert_ne!(result.class, EventClass::HumVoiced);
     }
 }

@@ -492,8 +492,16 @@ pub async fn detect_events(
                     }
                 })?;
 
-            // Use KNN classifier with calibration
-            Some(events::KnnClassifier::new(calibration_profile, 5))
+            // MAP-adapt the factory Gaussian model from the user's labeled
+            // calibration samples (AVP LOPO: 81.6% adapted vs 79.7% agnostic;
+            // the old per-user kNN sat at 60.2% and is retired from this path).
+            let samples: Vec<(EventClass, Vec<f32>)> = calibration_profile
+                .samples
+                .values()
+                .flatten()
+                .map(|s| (s.class, s.gaussian_vec()))
+                .collect();
+            events::HybridClassifier::with_adaptation(&samples)
         } else {
             return Err(CommandError {
                 message: "Calibration profile ID required when use_calibration is true"
@@ -501,17 +509,11 @@ pub async fn detect_events(
             });
         }
     } else {
-        None
-    };
-
-    // Use heuristic classifier if no calibration
-    let heuristic = if classifier.is_none() {
-        Some(events::HeuristicClassifier::new())
-    } else {
-        None
+        events::HybridClassifier::factory()
     };
 
     // Classify each onset
+    let mono = audio.to_mono();
     let mut events = Vec::new();
 
     for (i, onset) in onsets.iter().enumerate() {
@@ -529,21 +531,26 @@ pub async fn detect_events(
         let features =
             audio::extract_features_for_window(&audio, onset.timestamp_ms, window_duration_ms);
 
-        // Classify using appropriate classifier. The heuristic path also
-        // yields per-class scores that we thread through for explainability;
-        // the KNN path does not expose them (left empty).
-        let (class, confidence, class_scores) = if let Some(ref knn) = classifier {
-            let (class, confidence) = knn.classify(&features).unwrap_or((EventClass::Click, 0.5));
-            (class, confidence, Vec::new())
-        } else if let Some(ref h) = heuristic {
-            let result = h.classify(&features);
-            (result.class, result.confidence, result.class_scores())
+        // MFCCs over the fixed window the factory model was fitted with.
+        let start = ((onset.timestamp_ms / 1000.0) * audio.sample_rate as f64) as usize;
+        let mfcc_len = ((events::hybrid::HYBRID_MFCC_WINDOW_MS / 1000.0)
+            * audio.sample_rate as f64) as usize;
+        let end = (start + mfcc_len).min(mono.len());
+        let mfcc = if start < end {
+            audio::extract_mfcc(&mono[start..end], audio.sample_rate)
         } else {
-            (EventClass::Click, 0.5, Vec::new()) // Fallback
+            vec![0.0; audio::MFCC_COEFFS]
         };
 
-        let event = Event::new(onset.timestamp_ms, duration_ms, class, confidence, features)
-            .with_scores(class_scores);
+        let result = classifier.classify(&features, &mfcc);
+        let event = Event::new(
+            onset.timestamp_ms,
+            duration_ms,
+            result.class,
+            result.confidence,
+            features,
+        )
+        .with_scores(result.class_scores());
         events.push(event);
 
         // Progress trace

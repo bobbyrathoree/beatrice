@@ -12,7 +12,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use beatrice_dsp::{analyze_offline, AudioData, LiveEvent, OnsetConfig, StreamingDetector};
+use beatrice_dsp::events::HybridClassifier;
+use beatrice_dsp::{analyze_offline_hybrid, AudioData, LiveEvent, OnsetConfig, StreamingDetector};
 
 /// The corpus. Multi-event patterns are the meaningful tolerance surface; the
 /// single-hit fixtures pin per-class alignment at t≈0.
@@ -89,19 +90,26 @@ fn run_streaming(audio: &AudioData) -> Vec<LiveEvent> {
     for chunk in mono.chunks(128) {
         live.extend(det.push(chunk));
     }
+    // End-of-stream: classify onsets whose 150ms window the (finite) fixture
+    // cut short — mirrors how jam capture flushes when the mic stops.
+    live.extend(det.flush());
     live
 }
 
 #[test]
 fn streaming_matches_offline_within_tolerance() {
     let cfg = OnsetConfig::default();
+    // Both sides classify through the shipping hybrid (Gaussian + hum gate);
+    // the tolerance surface is onset alignment + classifier agreement across
+    // the two detectors' different windows, not the heuristic's rules.
+    let hybrid = HybridClassifier::factory();
     let mut total_offline = 0usize;
     let mut total_matched = 0usize;
 
     println!("\n=== streaming vs offline tolerance (±{TOLERANCE_MS}ms, same class) ===");
     for name in FIXTURES {
         let audio = load_fixture(name);
-        let offline = analyze_offline(&audio, &cfg);
+        let offline = analyze_offline_hybrid(&audio, &cfg, &hybrid);
         let live = run_streaming(&audio);
 
         let mut matched = 0usize;

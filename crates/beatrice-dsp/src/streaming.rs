@@ -46,10 +46,9 @@
 
 use std::collections::VecDeque;
 
-use crate::events::calibration::KnnClassifier;
 use crate::events::types::{EventClass, EventFeatures};
-use crate::events::{CalibrationProfile, CalibrationSample, HeuristicClassifier};
-use crate::features::{apply_hann_window, compute_fft, extract_features};
+use crate::events::{CalibrationProfile, CalibrationSample, HybridClassifier};
+use crate::features::{apply_hann_window, compute_fft, extract_features, extract_mfcc};
 
 /// A classified event emitted by the streaming detector.
 ///
@@ -69,6 +68,9 @@ pub struct LiveEvent {
     pub confidence: f32,
     /// Features extracted from the classification window.
     pub features: EventFeatures,
+    /// Mean MFCCs (c1..c20) of the classification window — forwarded so a
+    /// calibration echo-back carries the full Gaussian feature vector.
+    pub mfcc: Vec<f32>,
 }
 
 /// Tunable parameters for [`StreamingDetector`].
@@ -124,7 +126,13 @@ impl Default for StreamingConfig {
             stats_window_ms: 2000.0,
             min_onset_gap_ms: 120.0,
             min_flux: 0.5,
-            feature_window_ms: 100.0,
+            // Matches the Gaussian factory model's training window
+            // (HYBRID_MFCC_WINDOW_MS): the model learned 150ms timbre stats, and
+            // classifying over a different window measurably costs accuracy
+            // (AVP: 80.5% @100ms vs 81.6% @150ms). The extra 50ms of emission
+            // deferral is fine for the visual jam form (latency gate was NO-GO
+            // for live synthesis anyway).
+            feature_window_ms: crate::events::hybrid::HYBRID_MFCC_WINDOW_MS,
             // Calibrated against the fixture corpus (see tests/streaming_tolerance.rs
             // and the module docs). Offline's large 2048 window reports different
             // per-class biases: it lands near the true centre for low-frequency
@@ -196,17 +204,18 @@ pub struct StreamingDetector {
     pending: VecDeque<PendingOnset>,
 
     /// The accumulating user calibration profile (Task 5). Samples are added
-    /// live in jam mode; the source of truth for `knn`.
+    /// live in jam mode; the source of truth for `adapted`.
     profile: CalibrationProfile,
-    /// Cached kNN classifier, rebuilt from `profile` whenever samples change.
-    /// `Some` only once the profile is sufficient (≥5 samples for all 4
-    /// classes), so a half-taught profile never classifies.
-    knn: Option<KnnClassifier>,
-    /// The A/B toggle. When `true` AND `knn` is `Some`, kNN classifies first
-    /// (heuristic fallback on a kNN no-verdict). When `false`, the heuristic
-    /// always wins — this is what the panel's HEURISTIC/YOURS switch flips.
+    /// Hybrid classifier MAP-adapted to `profile`, rebuilt whenever samples
+    /// change. `Some` only once the profile is sufficient (≥5 samples for all
+    /// 4 classes), so a half-taught profile never overrides the factory model.
+    adapted: Option<HybridClassifier>,
+    /// The A/B toggle. When `true` AND `adapted` is `Some`, the MAP-adapted
+    /// model classifies. When `false`, the factory model always wins — this is
+    /// what the panel's FACTORY/YOURS switch flips.
     calibration_enabled: bool,
-    heuristic: HeuristicClassifier,
+    /// The user-agnostic factory hybrid (AVP Gaussian + hum gate).
+    factory: HybridClassifier,
 }
 
 impl StreamingDetector {
@@ -248,23 +257,23 @@ impl StreamingDetector {
             leading_checked: false,
             pending: VecDeque::new(),
             profile: CalibrationProfile::new("live".to_string()),
-            knn: None,
+            adapted: None,
             calibration_enabled: false,
-            heuristic: HeuristicClassifier::new(),
+            factory: HybridClassifier::factory(),
         }
     }
 
     /// Create a detector seeded with a user [`CalibrationProfile`] and
-    /// calibration ENABLED. If the profile is already sufficient the detector is
-    /// kNN-first out of the gate (heuristic fallback on a kNN no-verdict); an
-    /// insufficient profile still falls through to the heuristic until enough
-    /// samples are added. This is the Task 5 personalization path — the worklet
-    /// loads a persisted profile this way on jam start.
+    /// calibration ENABLED. If the profile is already sufficient the detector
+    /// classifies with the MAP-adapted model out of the gate; an insufficient
+    /// profile still falls through to the factory model until enough samples
+    /// are added. This is the Task 5 personalization path — the worklet loads
+    /// a persisted profile this way on jam start.
     pub fn with_profile(sample_rate: u32, profile: CalibrationProfile) -> Self {
         let mut det = Self::new(sample_rate);
         det.profile = profile;
         det.calibration_enabled = true;
-        det.rebuild_knn();
+        det.rebuild_adapted();
         det
     }
 
@@ -274,21 +283,21 @@ impl StreamingDetector {
     }
 
     /// Add a labeled calibration sample to the live profile (Task 5). Rebuilds
-    /// the kNN classifier; it starts classifying only once the profile becomes
+    /// the MAP-adapted model; it takes over only once the profile becomes
     /// sufficient ([`CalibrationProfile::is_sufficient`]).
     pub fn add_calibration_sample(&mut self, sample: CalibrationSample) {
         self.profile.add_sample(sample);
-        self.rebuild_knn();
+        self.rebuild_adapted();
     }
 
-    /// Flip the A/B toggle. `true` = personal (kNN-first when sufficient),
-    /// `false` = heuristic-only. Cheap — does not touch the profile.
+    /// Flip the A/B toggle. `true` = personal (MAP-adapted when sufficient),
+    /// `false` = factory model. Cheap — does not touch the profile.
     pub fn set_calibration_enabled(&mut self, enabled: bool) {
         self.calibration_enabled = enabled;
     }
 
-    /// Drop the accumulated calibration profile and rebuild the kNN classifier
-    /// (which becomes `None`, so classification falls back to the heuristic).
+    /// Drop the accumulated calibration profile and rebuild the adapted model
+    /// (which becomes `None`, so classification falls back to the factory).
     ///
     /// Used when a re-teach begins: the worklet may have been re-seeded with a
     /// persisted profile on jam start, so `add_calibration_sample` would
@@ -296,14 +305,14 @@ impl StreamingDetector {
     /// the live profile away from what the panel accumulates and later persists.
     /// Clearing first makes a re-teach start from a clean profile. The A/B
     /// toggle (`calibration_enabled`) is left untouched; with an empty profile
-    /// `knn` is `None`, so `classify` uses the heuristic until enough new
-    /// samples are taught.
+    /// `adapted` is `None`, so `classify` uses the factory model until enough
+    /// new samples are taught.
     pub fn clear_calibration(&mut self) {
         self.profile = CalibrationProfile::new("live".to_string());
-        self.rebuild_knn();
+        self.rebuild_adapted();
     }
 
-    /// Whether the accumulated profile has enough samples to classify with kNN.
+    /// Whether the accumulated profile has enough samples to personalize.
     pub fn is_calibration_sufficient(&self) -> bool {
         self.profile.is_sufficient()
     }
@@ -313,12 +322,19 @@ impl StreamingDetector {
         &self.profile
     }
 
-    /// Rebuild the cached kNN classifier from the current profile. `knn` is
+    /// Rebuild the MAP-adapted hybrid from the current profile. `adapted` is
     /// `Some` only when the profile is sufficient, so an under-taught profile
-    /// never overrides the heuristic even with calibration enabled.
-    fn rebuild_knn(&mut self) {
-        self.knn = if self.profile.is_sufficient() {
-            Some(KnnClassifier::new(self.profile.clone(), 5))
+    /// never overrides the factory model even with calibration enabled.
+    fn rebuild_adapted(&mut self) {
+        self.adapted = if self.profile.is_sufficient() {
+            let samples: Vec<(EventClass, Vec<f32>)> = self
+                .profile
+                .samples
+                .values()
+                .flatten()
+                .map(|s| (s.class, s.gaussian_vec()))
+                .collect();
+            Some(HybridClassifier::with_adaptation(&samples))
         } else {
             None
         };
@@ -346,6 +362,29 @@ impl StreamingDetector {
         // window has now filled. Registration only queues, so nothing is lost.
         let mut out = Vec::new();
         self.drain_ready(&mut out);
+        out
+    }
+
+    /// End-of-stream: classify every still-pending onset from whatever audio
+    /// has arrived. Call when the input stops — e.g. jam capture ends — so an
+    /// onset within the last `feature_window_ms` of the stream is not lost.
+    ///
+    /// The window is TRIMMED to the audio that actually arrived (matching the
+    /// offline pipeline's end-of-file clamp) rather than zero-padded: padding
+    /// silent frames dilutes the MFCC mean and measurably shifts the verdict
+    /// on short tails.
+    pub fn flush(&mut self) -> Vec<LiveEvent> {
+        let mut out = Vec::new();
+        while let Some(p) = self.pending.pop_front() {
+            let fw_samples =
+                (self.cfg.feature_window_ms / 1000.0 * self.sample_rate as f64) as usize;
+            let available = self.samples_seen.saturating_sub(p.onset_abs);
+            let win = self.ring_slice(p.onset_abs, fw_samples.min(available).max(1));
+            let features = extract_features(&win, self.sample_rate);
+            let mfcc = extract_mfcc(&win, self.sample_rate);
+            let (class, confidence) = self.classify(&features, &mfcc);
+            out.push(LiveEvent { t_ms: p.t_ms, class, confidence, features, mfcc });
+        }
         out
     }
 
@@ -529,27 +568,27 @@ impl StreamingDetector {
                 (self.cfg.feature_window_ms / 1000.0 * self.sample_rate as f64) as usize;
             let win = self.ring_slice(p.onset_abs, fw_samples.max(1));
             let features = extract_features(&win, self.sample_rate);
-            let (class, confidence) = self.classify(&features);
-            out.push(LiveEvent { t_ms: p.t_ms, class, confidence, features });
+            let mfcc = extract_mfcc(&win, self.sample_rate);
+            let (class, confidence) = self.classify(&features, &mfcc);
+            out.push(LiveEvent { t_ms: p.t_ms, class, confidence, features, mfcc });
         }
     }
 
-    /// Classify features. kNN-first when calibration is enabled AND the profile
-    /// is sufficient (`knn` is `Some`), falling back to the heuristic on a kNN
-    /// no-verdict; the heuristic otherwise. This gate is what the A/B toggle
-    /// flips: [`set_calibration_enabled`](Self::set_calibration_enabled).
+    /// Classify features + MFCCs through the hybrid model: the MAP-adapted
+    /// model when calibration is enabled AND the profile is sufficient
+    /// (`adapted` is `Some`), the factory model otherwise. This gate is what
+    /// the A/B toggle flips:
+    /// [`set_calibration_enabled`](Self::set_calibration_enabled).
     ///
     /// Public so the worklet's calibration UI can re-classify a probe/event
     /// through the live gate without re-running detection.
-    pub fn classify(&self, f: &EventFeatures) -> (EventClass, f32) {
-        if self.calibration_enabled {
-            if let Some(knn) = &self.knn {
-                if let Some((class, conf)) = knn.classify(f) {
-                    return (class, conf);
-                }
-            }
-        }
-        let r = self.heuristic.classify(f);
+    pub fn classify(&self, f: &EventFeatures, mfcc: &[f32]) -> (EventClass, f32) {
+        let clf = if self.calibration_enabled {
+            self.adapted.as_ref().unwrap_or(&self.factory)
+        } else {
+            &self.factory
+        };
+        let r = clf.classify(f, mfcc);
         (r.class, r.confidence)
     }
 
@@ -715,49 +754,65 @@ mod tests {
         }
     }
 
-    #[test]
-    fn detector_prefers_knn_after_sufficient_calibration() {
-        // Teach Beatrice — deliberately weird — that a hihat-like sound is a
-        // "Click" (the panel's "make your KICK sound as a TSS" scenario). Then
-        // the A/B toggle must flip the verdict on the SAME probe:
-        //   HEURISTIC (off) → HihatNoise (what the rules say)
-        //   YOURS     (on)  → Click       (what the user taught)
-        let mut det = StreamingDetector::new(44_100);
+    /// Probe used across the calibration-gating tests. MFCCs are zero (these
+    /// synthetic samples carry no raw audio), so the Gaussian sees only the
+    /// zcr/crest dims move — which is exactly what the gating tests need: a
+    /// deterministic, non-flaky difference between factory and adapted.
+    fn probe() -> (EventFeatures, Vec<f32>) {
+        (hihat_like(), vec![0.0; crate::features::MFCC_COEFFS])
+    }
 
-        // Not sufficient yet → heuristic even when enabled.
+    #[test]
+    fn detector_prefers_adapted_after_sufficient_calibration() {
+        // Teach Beatrice — deliberately weird — that a hihat-like sound is a
+        // "Click" (the panel's "make your KICK sound as a TSS" scenario). MAP
+        // adaptation is intentionally gentler than the old kNN memorization
+        // (5 samples move a class mean by 1/3, per the AVP-tuned tau=10), so
+        // the contract is: the A/B toggle must CHANGE the verdict on the same
+        // probe once the profile is sufficient — not necessarily flip its
+        // class outright.
+        let (pf, pm) = probe();
+        let mut det = StreamingDetector::new(44_100);
+        let factory_verdict = det.classify(&pf, &pm);
+
+        // Not sufficient yet → factory verdict even when enabled.
         det.set_calibration_enabled(true);
-        assert_eq!(det.classify(&hihat_like()).0, EventClass::HihatNoise);
+        assert_eq!(det.classify(&pf, &pm), factory_verdict);
 
         teach(&mut det, EventClass::Click, hihat_like()); // the weird lesson
         teach(&mut det, EventClass::BilabialPlosive, kick_like());
         teach(&mut det, EventClass::HihatNoise, other_hat());
         teach(&mut det, EventClass::HumVoiced, hum_like());
+        assert!(det.is_calibration_sufficient());
 
-        // Calibration OFF → heuristic verdict.
+        // Calibration OFF → factory verdict.
         det.set_calibration_enabled(false);
         assert_eq!(
-            det.classify(&hihat_like()).0,
-            EventClass::HihatNoise,
-            "with calibration off the heuristic should win"
+            det.classify(&pf, &pm),
+            factory_verdict,
+            "with calibration off the factory model should win"
         );
 
-        // Calibration ON → the taught (kNN) verdict overrides the heuristic.
+        // Calibration ON → the adapted model answers differently (the Click
+        // mean moved 1/3 toward the probe, so its posterior visibly shifts).
         det.set_calibration_enabled(true);
-        assert_eq!(
-            det.classify(&hihat_like()).0,
-            EventClass::Click,
-            "with calibration on kNN should override the heuristic"
+        let adapted_verdict = det.classify(&pf, &pm);
+        assert!(
+            adapted_verdict.0 != factory_verdict.0
+                || (adapted_verdict.1 - factory_verdict.1).abs() > 1e-4,
+            "adaptation must change the verdict: factory {factory_verdict:?} vs adapted {adapted_verdict:?}"
         );
     }
 
     #[test]
-    fn clear_calibration_reverts_to_heuristic() {
+    fn clear_calibration_reverts_to_factory() {
         // A re-teach begins on a detector that was re-seeded with a sufficient
         // profile. clear_calibration() must drop the profile so the SAME probe
-        // stops classifying by the (weird) taught verdict and falls back to the
-        // heuristic — even with the A/B toggle still ON. Then re-teaching from
-        // scratch must make kNN sufficient again.
+        // reverts to the exact factory verdict — even with the A/B toggle
+        // still ON. Then re-teaching from scratch must re-personalize.
+        let (pf, pm) = probe();
         let mut det = StreamingDetector::new(44_100);
+        let factory_verdict = det.classify(&pf, &pm);
         det.set_calibration_enabled(true);
 
         teach(&mut det, EventClass::Click, hihat_like()); // weird lesson
@@ -765,35 +820,36 @@ mod tests {
         teach(&mut det, EventClass::HihatNoise, other_hat());
         teach(&mut det, EventClass::HumVoiced, hum_like());
         assert!(det.is_calibration_sufficient());
-        assert_eq!(
-            det.classify(&hihat_like()).0,
-            EventClass::Click,
-            "sufficient calibration should classify by the taught verdict"
+        let adapted_verdict = det.classify(&pf, &pm);
+        assert!(
+            adapted_verdict != factory_verdict,
+            "sufficient calibration should change the verdict"
         );
 
-        // Clear: profile emptied, knn rebuilt to None → heuristic wins again
+        // Clear: profile emptied, adapted rebuilt to None → factory wins again
         // despite calibration_enabled staying true.
         det.clear_calibration();
         assert!(!det.is_calibration_sufficient(), "profile should be empty after clear");
         assert_eq!(
-            det.classify(&hihat_like()).0,
-            EventClass::HihatNoise,
-            "after clear, classify must fall back to the heuristic"
+            det.classify(&pf, &pm),
+            factory_verdict,
+            "after clear, classify must fall back to the factory model"
         );
 
-        // Re-teaching from the clean profile makes kNN sufficient again.
+        // Re-teaching from the clean profile personalizes again.
         teach(&mut det, EventClass::Click, hihat_like());
         teach(&mut det, EventClass::BilabialPlosive, kick_like());
         teach(&mut det, EventClass::HihatNoise, other_hat());
         teach(&mut det, EventClass::HumVoiced, hum_like());
         assert!(det.is_calibration_sufficient());
-        assert_eq!(det.classify(&hihat_like()).0, EventClass::Click);
+        assert_eq!(det.classify(&pf, &pm), adapted_verdict);
     }
 
     #[test]
-    fn with_profile_is_knn_first() {
+    fn with_profile_is_adapted_first() {
         // The brief's Step-1 shape: a pre-built sufficient profile makes the
-        // detector kNN-first out of the gate.
+        // detector personalized out of the gate — identical to teaching the
+        // same samples live.
         let mut profile = CalibrationProfile::new("test".into());
         for _ in 0..5 {
             profile.add_sample(CalibrationSample::new(EventClass::Click, hihat_like(), vec![], 44_100));
@@ -801,8 +857,20 @@ mod tests {
             profile.add_sample(CalibrationSample::new(EventClass::HihatNoise, other_hat(), vec![], 44_100));
             profile.add_sample(CalibrationSample::new(EventClass::HumVoiced, hum_like(), vec![], 44_100));
         }
-        let det = StreamingDetector::with_profile(44_100, profile);
-        assert_eq!(det.classify(&hihat_like()).0, EventClass::Click);
+        let (pf, pm) = probe();
+        let seeded = StreamingDetector::with_profile(44_100, profile);
+
+        let mut taught = StreamingDetector::new(44_100);
+        taught.set_calibration_enabled(true);
+        teach(&mut taught, EventClass::Click, hihat_like());
+        teach(&mut taught, EventClass::BilabialPlosive, kick_like());
+        teach(&mut taught, EventClass::HihatNoise, other_hat());
+        teach(&mut taught, EventClass::HumVoiced, hum_like());
+
+        assert_eq!(seeded.classify(&pf, &pm), taught.classify(&pf, &pm));
+        // And it differs from factory (the profile actually took effect).
+        let factory = StreamingDetector::new(44_100);
+        assert!(seeded.classify(&pf, &pm) != factory.classify(&pf, &pm));
     }
 
     #[test]

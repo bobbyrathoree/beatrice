@@ -1,8 +1,8 @@
 // calibrationStore — persistence for few-shot voice calibration (Phase 3 Task 5).
 //
-// A calibration profile is a set of labeled samples (classId + the 7-float
-// EventFeatures vector) the user taught in jam mode. This module is the single,
-// pure, unit-testable home for:
+// A calibration profile is a set of labeled samples (classId + the 27-float
+// [EventFeatures 7, mfcc 20] vector) the user taught in jam mode. This module
+// is the single, pure, unit-testable home for:
 //   1. building the Rust `CalibrationProfile` JSON shape from accumulated
 //      samples (so the native offline `detect_events` use_calibration path can
 //      parse it via `CalibrationProfile::from_json_bytes`), and
@@ -24,7 +24,11 @@ import { isTauriAvailable } from "../utils/tauri-mock";
 export interface CalibrationSampleInput {
   /** EventClass id (0=kick, 1=hihat, 2=snare/click, 3=hum). */
   classId: number;
-  /** 7-float EventFeatures vector: [centroid, zcr, low, mid, high, peak, crest]. */
+  /**
+   * Feature vector in worklet-event order:
+   * [centroid, zcr, low, mid, high, peak, crest, mfcc1..mfcc20] (27 floats).
+   * Legacy 7-float records (pre-MFCC) still load; their MFCC block is zero.
+   */
   features: number[];
 }
 
@@ -62,7 +66,7 @@ export function isCalibrationSufficient(
 const LS_KEY = "beatrice.calibration.v1";
 const SAMPLE_RATE = 44100;
 
-/** Map a 7-float vector to the Rust `EventFeatures` JSON object. */
+/** Map the leading 7 floats to the Rust `EventFeatures` JSON object. */
 function toFeatures(f: number[]): Record<string, number> {
   return {
     spectral_centroid: f[0] ?? 0,
@@ -75,11 +79,14 @@ function toFeatures(f: number[]): Record<string, number> {
   };
 }
 
+/** Number of MFCC coefficients in the vector (mirrors Rust MFCC_COEFFS). */
+export const MFCC_COEFFS = 20;
+
 /**
  * Build the Rust `CalibrationProfile` JSON string from accumulated samples.
  * Shape mirrors `crates/beatrice-dsp/src/events/calibration.rs` serde output:
- *   { name, samples: { <ClassName>: [ {class, features, raw_window, sample_rate} ] },
- *     version, created_at }
+ *   { name, samples: { <ClassName>: [ {class, features, raw_window,
+ *     sample_rate, mfcc} ] }, version, created_at }
  * so `CalibrationProfile::from_json_bytes` round-trips it on the native side.
  */
 export function buildProfileJson(name: string, samples: CalibrationSampleInput[]): string {
@@ -91,6 +98,9 @@ export function buildProfileJson(name: string, samples: CalibrationSampleInput[]
       features: toFeatures(s.features),
       raw_window: [] as number[],
       sample_rate: SAMPLE_RATE,
+      // Floats 7..27 are the window's mean MFCCs (zeros for legacy samples),
+      // which the Gaussian MAP adaptation consumes on the native side.
+      mfcc: s.features.slice(7, 7 + MFCC_COEFFS),
     });
   }
   return JSON.stringify({

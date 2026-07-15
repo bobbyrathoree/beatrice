@@ -376,6 +376,7 @@ fn extract_all_features(items: &[Item], window_ms: f64) -> Result<Vec<EventFeatu
 
 /// Extract MFCC (mean, std) stats for every item (same per-WAV cache pattern
 /// as `extract_all_features`). Aligned by index with `items`.
+#[allow(clippy::type_complexity)]
 fn extract_all_mfccs(
     items: &[Item],
     window_ms: f64,
