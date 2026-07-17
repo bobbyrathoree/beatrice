@@ -17,7 +17,7 @@
 //! | STFT window / hop     | 2048 / 512                      | 512 / 256 (lower latency)                 |
 //! | Adaptive threshold    | mean + 2σ over the WHOLE file   | mean + 2σ over a rolling 2s flux window   |
 //! | Peak picking          | flux[i-1] < flux[i] > flux[i+1] over all frames | same, but confirmed 1 hop late (~6ms)     |
-//! | Classification window | fixed [onset, onset+150ms] (both paths) | fixed [onset, onset+`feature_window_ms`], deferred |
+//! | Classification window | hybrid: fixed [onset, onset+150ms]; heuristic: onset → next onset, clamp 50-500ms | fixed [onset, onset+`feature_window_ms`], deferred |
 //! | Kick fallback         | parallel RMS-envelope detector  | causal energy-rise detector               |
 //! | Leading onset (t≈0)   | first-10ms RMS gate             | same                                       |
 //!
