@@ -11,4 +11,6 @@ BUCKET="beatrice-ml-387391740137-usw2"
 RUN_ID="${1:-}"
 [ -n "$RUN_ID" ] || { echo "usage: $0 <run-id>" >&2; exit 2; }
 
-aws s3 cp "s3://$BUCKET/runs/$RUN_ID/train.log" - | tail -100
+if ! aws s3 cp "s3://$BUCKET/runs/$RUN_ID/train.log" - 2>/dev/null | tail -100; then
+  echo "no log yet for $RUN_ID"
+fi

@@ -7,8 +7,10 @@
 # rendered file as --user-data. Do not run this template directly.
 #
 # Order of operations (safety first):
+#   0. INSTALL THE 12h SELF-TERMINATE TIMER + EXIT poweroff TRAP *FIRST*,
+#      before any network call, so a setup failure/hang can never leak an
+#      instance (before timer) or idle it for 12h (before trap).
 #   1. install uv + pull code/data from S3 and untar
-#   2. INSTALL THE 12h SELF-TERMINATE TIMER *BEFORE* ANY WORK STARTS
 #   3. uv sync
 #   4. run runs/<run-id>/cmd.sh, logging to runs/<run-id>/train.log
 #   5. sync runs/<run-id>/ to S3 every 10 min (background) and once at exit
@@ -28,6 +30,39 @@ RUN_DIR="$TRAIN_DIR/runs/$RUN_ID"
 LOG="$RUN_DIR/train.log"
 
 log() { echo "[bootstrap $(date -u +%FT%TZ)] $*"; }
+
+# --- 0. cost-safety guards BEFORE any network call ------------------------ #
+# Install these FIRST so a failure/hang in setup (curl, s3 cp, tar, sed, uv
+# sync) can never leave the instance running past 12h or idling indefinitely.
+
+# 12h self-terminate timer.
+log "installing 12h self-terminate timer"
+cat >/etc/systemd/system/beatrice-selfterminate.service <<'EOF'
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl poweroff
+EOF
+cat >/etc/systemd/system/beatrice-selfterminate.timer <<'EOF'
+[Timer]
+OnBootSec=12h
+[Install]
+WantedBy=timers.target
+EOF
+systemctl enable --now beatrice-selfterminate.timer
+
+# Best-effort final sync + poweroff on ANY exit (S3 may be unreachable in a
+# failure path, hence || true inside sync_run). SYNC_PID is empty until the
+# background sync loop starts later, so finish() is safe to fire before then.
+sync_run() { aws s3 sync "$RUN_DIR/" "s3://$BUCKET/runs/$RUN_ID/" --no-progress || true; }
+
+SYNC_PID=""
+finish() {
+  log "finishing: stopping sync loop, final sync, poweroff"
+  [ -n "$SYNC_PID" ] && kill "$SYNC_PID" 2>/dev/null || true
+  sync_run
+  poweroff
+}
+trap finish EXIT
 
 # --- 1. install uv + pull code/data --------------------------------------- #
 log "installing uv"
@@ -58,38 +93,12 @@ sed -e "s#^\([[:space:]]*avp_root:\).*#\1 $DATA_DIR/avp_personal#" \
     "$TRAIN_DIR/configs/avplvt_v1.yaml" > "$EC2_CONFIG"
 log "wrote EC2 config override -> $EC2_CONFIG"
 
-# --- 2. self-terminate timer BEFORE any work ------------------------------ #
-log "installing 12h self-terminate timer"
-cat >/etc/systemd/system/beatrice-selfterminate.service <<'EOF'
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/systemctl poweroff
-EOF
-cat >/etc/systemd/system/beatrice-selfterminate.timer <<'EOF'
-[Timer]
-OnBootSec=12h
-[Install]
-WantedBy=timers.target
-EOF
-systemctl enable --now beatrice-selfterminate.timer
-
 # --- 3. uv sync ----------------------------------------------------------- #
 log "uv sync"
 cd "$TRAIN_DIR"
 uv sync
 
-# --- 5. background S3 sync loop + exit trap (defined before work) --------- #
-sync_run() { aws s3 sync "$RUN_DIR/" "s3://$BUCKET/runs/$RUN_ID/" --no-progress || true; }
-
-SYNC_PID=""
-finish() {
-  log "finishing: stopping sync loop, final sync, poweroff"
-  [ -n "$SYNC_PID" ] && kill "$SYNC_PID" 2>/dev/null || true
-  sync_run
-  poweroff
-}
-trap finish EXIT
-
+# --- 5. background S3 sync loop (exit trap installed in section 0) -------- #
 ( while true; do sleep 600; sync_run; done ) &
 SYNC_PID=$!
 
