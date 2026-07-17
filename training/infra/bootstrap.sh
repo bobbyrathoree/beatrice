@@ -16,7 +16,10 @@
 #   5. sync runs/<run-id>/ to S3 every 10 min (background) and once at exit
 #   6. poweroff  (with --instance-initiated-shutdown-behavior terminate ⇒ terminate)
 set -euo pipefail
-export AWS_PROFILE=default AWS_DEFAULT_REGION=us-west-2
+# NOTE: do NOT export AWS_PROFILE here. On EC2 there is no ~/.aws config, and
+# an explicitly-set AWS_PROFILE makes the CLI raise ProfileNotFound instead of
+# falling through to the instance role. Region alone is safe.
+export AWS_DEFAULT_REGION=us-west-2
 
 RUN_ID="__RUN_ID__"
 BUCKET="__BUCKET__"
@@ -34,6 +37,11 @@ log() { echo "[bootstrap $(date -u +%FT%TZ)] $*"; }
 # --- 0. cost-safety guards BEFORE any network call ------------------------ #
 # Install these FIRST so a failure/hang in setup (curl, s3 cp, tar, sed, uv
 # sync) can never leave the instance running past 12h or idling indefinitely.
+
+# Capture ALL bootstrap output so setup failures are diagnosable from S3
+# (finish() syncs RUN_DIR, so bootstrap.log lands there even on early death).
+mkdir -p "$RUN_DIR"
+exec >>"$RUN_DIR/bootstrap.log" 2>&1
 
 # 12h self-terminate timer.
 log "installing 12h self-terminate timer"
