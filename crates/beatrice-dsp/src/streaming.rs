@@ -650,6 +650,27 @@ mod tests {
     }
 
     #[test]
+    fn flush_recovers_tail_onset_and_is_idempotent() {
+        // A kick whose 150ms classification window CANNOT fill: the stream
+        // ends 60ms after the onset. push() must hold it pending; flush()
+        // must classify it from the trimmed window; a second flush is empty.
+        let sr = 44_100u32;
+        let mut audio = vec![0.0f32; (sr / 2) as usize]; // 500ms silence
+        let kick = synth_kick(sr, 0.06); // 60ms of kick, then stream ends
+        audio.extend_from_slice(&kick);
+        let mut det = StreamingDetector::new(sr);
+        let mut live = Vec::new();
+        for chunk in audio.chunks(128) {
+            live.extend(det.push(chunk));
+        }
+        assert!(live.is_empty(), "window never fills; push must not emit");
+        let flushed = det.flush();
+        assert_eq!(flushed.len(), 1, "flush must recover the pending onset");
+        assert_eq!(flushed[0].class, EventClass::BilabialPlosive);
+        assert!(det.flush().is_empty(), "flush must be idempotent");
+    }
+
+    #[test]
     fn silence_emits_nothing() {
         let mut det = StreamingDetector::new(44_100);
         let silence = vec![0.0f32; 44_100 * 2];

@@ -51,6 +51,13 @@ export class WasmDetector {
      */
     clear_calibration(): void;
     /**
+     * End-of-stream drain: classify every still-pending onset over whatever
+     * audio actually arrived (window trimmed, not zero-padded). Same record
+     * layout as [`push`](Self::push). Call once when the jam session stops so
+     * the final hit isn't dropped; subsequent calls return empty.
+     */
+    flush(): Float32Array;
+    /**
      * Whether the accumulated profile has ≥5 samples for all 4 classes.
      */
     is_calibration_sufficient(): boolean;
@@ -75,6 +82,7 @@ export interface InitOutput {
     readonly wasmdetector_add_calibration_sample: (a: number, b: number, c: number, d: number) => void;
     readonly wasmdetector_calibration_profile_json: (a: number) => [number, number];
     readonly wasmdetector_clear_calibration: (a: number) => void;
+    readonly wasmdetector_flush: (a: number) => [number, number];
     readonly wasmdetector_is_calibration_sufficient: (a: number) => number;
     readonly wasmdetector_new: (a: number) => number;
     readonly wasmdetector_push: (a: number, b: number, c: number) => [number, number];

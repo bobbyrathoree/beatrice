@@ -72,6 +72,19 @@ export class WasmDetector {
         wasm.wasmdetector_clear_calibration(this.__wbg_ptr);
     }
     /**
+     * End-of-stream drain: classify every still-pending onset over whatever
+     * audio actually arrived (window trimmed, not zero-padded). Same record
+     * layout as [`push`](Self::push). Call once when the jam session stops so
+     * the final hit isn't dropped; subsequent calls return empty.
+     * @returns {Float32Array}
+     */
+    flush() {
+        const ret = wasm.wasmdetector_flush(this.__wbg_ptr);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * Whether the accumulated profile has ≥5 samples for all 4 classes.
      * @returns {boolean}
      */

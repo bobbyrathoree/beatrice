@@ -187,25 +187,15 @@ impl WasmDetector {
     /// Push one render quantum. Returns [`WASM_EVENT_STRIDE`]-float records
     /// (flat) for every event confirmed during this quantum; empty if none.
     pub fn push(&mut self, samples: &[f32]) -> Vec<f32> {
-        let events = self.0.push(samples);
-        let mut out = Vec::with_capacity(events.len() * WASM_EVENT_STRIDE);
-        for e in events {
-            out.push(e.t_ms as f32);
-            out.push(class_id(e.class));
-            out.push(e.confidence);
-            let f = &e.features;
-            out.push(f.spectral_centroid);
-            out.push(f.zcr);
-            out.push(f.low_band_energy);
-            out.push(f.mid_band_energy);
-            out.push(f.high_band_energy);
-            out.push(f.peak_amplitude);
-            out.push(f.crest_factor);
-            for i in 0..crate::features::MFCC_COEFFS {
-                out.push(e.mfcc.get(i).copied().unwrap_or(0.0));
-            }
-        }
-        out
+        encode_live_events(self.0.push(samples))
+    }
+
+    /// End-of-stream drain: classify every still-pending onset over whatever
+    /// audio actually arrived (window trimmed, not zero-padded). Same record
+    /// layout as [`push`](Self::push). Call once when the jam session stops so
+    /// the final hit isn't dropped; subsequent calls return empty.
+    pub fn flush(&mut self) -> Vec<f32> {
+        encode_live_events(self.0.flush())
     }
 
     /// Add a labeled calibration sample from the main thread. `class_id` is the
@@ -271,6 +261,30 @@ impl WasmDetector {
             .to_json_bytes()
             .unwrap_or_default()
     }
+}
+
+/// Encode [`LiveEvent`]s as flat [`WASM_EVENT_STRIDE`]-float records (the
+/// push()/flush() ABI — see the WasmDetector docs for the layout).
+#[cfg(feature = "wasm")]
+fn encode_live_events(events: Vec<LiveEvent>) -> Vec<f32> {
+    let mut out = Vec::with_capacity(events.len() * WASM_EVENT_STRIDE);
+    for e in events {
+        out.push(e.t_ms as f32);
+        out.push(class_id(e.class));
+        out.push(e.confidence);
+        let f = &e.features;
+        out.push(f.spectral_centroid);
+        out.push(f.zcr);
+        out.push(f.low_band_energy);
+        out.push(f.mid_band_energy);
+        out.push(f.high_band_energy);
+        out.push(f.peak_amplitude);
+        out.push(f.crest_factor);
+        for i in 0..crate::features::MFCC_COEFFS {
+            out.push(e.mfcc.get(i).copied().unwrap_or(0.0));
+        }
+    }
+    out
 }
 
 /// Map the ABI `class_id` back to an [`EventClass`]. Inverse of [`class_id`];

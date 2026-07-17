@@ -15,6 +15,9 @@
 //                  20 mean MFCCs, forwarded so the calibration panel can echo a
 //                  detected event straight back as a labeled sample
 //                  ({type:"calibrate"}) without re-deriving features.
+//   { type: "flushed" }                                 after a flush drains,
+//                                        posted AFTER the final "event" messages
+//                                        so the main thread can tear down safely.
 //
 // INBOUND (main -> worklet):
 //   { type: "wasm", bytes }              compile+instantiate the detector
@@ -25,6 +28,9 @@
 //                                        (so new samples don't append onto a
 //                                        re-seeded profile — the model reverts
 //                                        to factory until the profile refills)
+//   { type: "flush" }                    end-of-stream: drain onsets still
+//                                        waiting on their 150ms window, then
+//                                        reply { type: "flushed" }
 //
 // WASM push() ABI: a flat Float32Array of EVENT_STRIDE (30) floats per event —
 //   [tMs, classId, conf, centroid, zcr, low, mid, high, peak, crest, mfcc1..20]
@@ -73,11 +79,15 @@ interface SetCalibrationMessage {
 interface ResetCalibrationMessage {
   type: "resetCalibration";
 }
+interface FlushMessage {
+  type: "flush";
+}
 type InboundMessage =
   | WasmMessage
   | CalibrateMessage
   | SetCalibrationMessage
-  | ResetCalibrationMessage;
+  | ResetCalibrationMessage
+  | FlushMessage;
 
 class DetectorProcessor extends AudioWorkletProcessor {
   private det: WasmDetector | null = null;
@@ -107,8 +117,31 @@ class DetectorProcessor extends AudioWorkletProcessor {
         // Re-teach begins: drop any re-seeded profile so fresh samples don't
         // append onto it (reverts to factory until the new profile refills).
         this.det?.clear_calibration();
+      } else if (msg.type === "flush") {
+        // End-of-stream: drain onsets still waiting on their 150ms window,
+        // then signal completion so the main thread can tear down safely.
+        if (this.det) this.postEvents(this.det.flush());
+        this.port.postMessage({ type: "flushed" });
       }
     };
+  }
+
+  /** Decode EVENT_STRIDE-float records and post one "event" message each. */
+  private postEvents(recs: Float32Array | number[]) {
+    for (let i = 0; i + EVENT_STRIDE - 1 < recs.length; i += EVENT_STRIDE) {
+      this.port.postMessage({
+        type: "event",
+        t: currentTime,
+        tMs: recs[i],
+        classId: recs[i + 1],
+        conf: recs[i + 2],
+        // 7 EventFeatures + 20 MFCCs — everything after the 3 header floats,
+        // in ABI order, so a calibration echo-back round-trips losslessly.
+        features: Array.from(
+          (recs as Float32Array).slice(i + 3, i + EVENT_STRIDE)
+        ),
+      });
+    }
   }
 
   process(inputs: Float32Array[][]): boolean {
@@ -121,19 +154,7 @@ class DetectorProcessor extends AudioWorkletProcessor {
     // estimated time relative to STREAM START; `currentTime` is the shared
     // worklet/AudioContext clock (seconds) callers use for scheduling. We
     // forward both plus the feature vector (for calibration echo-back).
-    const recs = this.det.push(ch);
-    for (let i = 0; i + EVENT_STRIDE - 1 < recs.length; i += EVENT_STRIDE) {
-      this.port.postMessage({
-        type: "event",
-        t: currentTime,
-        tMs: recs[i],
-        classId: recs[i + 1],
-        conf: recs[i + 2],
-        // 7 EventFeatures + 20 MFCCs — everything after the 3 header floats,
-        // in ABI order, so a calibration echo-back round-trips losslessly.
-        features: Array.from(recs.slice(i + 3, i + EVENT_STRIDE)),
-      });
-    }
+    this.postEvents(this.det.push(ch));
     return true;
   }
 }

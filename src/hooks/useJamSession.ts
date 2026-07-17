@@ -120,7 +120,38 @@ export function useJamSession(): JamSession {
   const bufferRef = useRef<JamBuffer>(new JamBuffer(BUFFER_WINDOW_MS));
   const keyRef = useRef(0);
 
+  /**
+   * Drain the detector's pending onsets before teardown so the final hit
+   * (within 150ms of stop) isn't dropped. Posts {type:"flush"} and waits for
+   * the {type:"flushed"} sentinel — the flushed events arrive through the
+   * regular port.onmessage handler first, landing in liveEvents/eventCount
+   * like any live event. Bounded by a timeout so a wedged/never-initialized
+   * worklet can never hang teardown.
+   */
+  const flushDetector = useCallback(async () => {
+    const node = nodeRef.current;
+    if (!node) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 250);
+      const onMsg = (e: MessageEvent) => {
+        if ((e.data as { type?: string })?.type === "flushed") {
+          clearTimeout(timer);
+          node.port.removeEventListener("message", onMsg);
+          resolve();
+        }
+      };
+      // addEventListener rides ALONGSIDE the port.onmessage set in start()
+      // (which already started the port), so live "event" messages still flow
+      // to the regular handler while we wait for the sentinel.
+      node.port.addEventListener("message", onMsg);
+      node.port.postMessage({ type: "flush" });
+    });
+  }, []);
+
   const teardown = useCallback(async () => {
+    // Drain pending detector events BEFORE disconnecting anything — after
+    // node.disconnect()/ctx.close() the flushed events would be lost.
+    await flushDetector();
     if (levelTimerRef.current) {
       clearInterval(levelTimerRef.current);
       levelTimerRef.current = null;
@@ -148,7 +179,7 @@ export function useJamSession(): JamSession {
     setAnalyser(null);
     setLevel(0);
     setIsRunning(false);
-  }, []);
+  }, [flushDetector]);
 
   const start = useCallback(async () => {
     setError(null);
