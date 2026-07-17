@@ -483,3 +483,167 @@ def matched_gaussian_baseline(config: dict, manifest_rows, roots, splits,
         "per_participant": per_participant,
         "aggregate": _aggregate(per_participant, shot_modes),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Efficacy-gate aggregation and paired participant bootstrap
+# --------------------------------------------------------------------------- #
+#
+# Gate spec (§8): 3-seed (1729, 2718, 31415) mean 5-shot merged-3-way
+# participant-macro accuracy over the pooled 40 dev participants:
+#   * pooled 3-seed mean ......................... >= 0.900   (mean_ok)
+#   * every individual seed's pooled 5-shot mean.. >= 0.880   (seeds_ok)
+#   * every class's pooled 5-shot recall ......... >= 0.800   (classes_ok)
+#   * paired participant bootstrap (10,000 resamples, seeded 1729) of the
+#     CNN - matched_gaussian per-participant 5-shot macro deltas:
+#     95% lower bound ............................ >  0        (bootstrap_ok)
+# PASS = mean_ok AND seeds_ok AND classes_ok AND bootstrap_ok.
+#
+# 0-shot / full-support pooled means are reported as secondaries, and
+# AVP-only / LVT-only 5-shot means as diagnostics (neither is gated).
+
+_GATE_SEEDS = (1729, 2718, 31415)
+_BOOTSTRAP_SEED = 1729
+
+_THRESH_MEAN = 0.900
+_THRESH_SEED = 0.880
+_THRESH_CLASS_RECALL = 0.800
+
+
+def paired_bootstrap_lower95(deltas, n_resamples: int = 10_000,
+                             seed: int = _BOOTSTRAP_SEED) -> float:
+    """Percentile bootstrap 95% lower bound of the mean of paired deltas.
+
+    ``deltas`` is one paired value per participant (e.g. CNN minus
+    matched-Gaussian 5-shot macro accuracy). Participants are resampled WITH
+    replacement ``n_resamples`` times; the mean of each resample forms the
+    bootstrap distribution, whose 2.5th percentile is returned. Deterministic
+    given ``seed`` (uses ``np.random.default_rng(seed)``)."""
+    deltas = np.asarray(deltas, dtype=np.float64).ravel()
+    n = deltas.shape[0]
+    if n == 0:
+        raise ValueError("paired_bootstrap_lower95 needs at least one delta")
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, n, size=(n_resamples, n))
+    resample_means = deltas[idx].mean(axis=1)
+    return float(np.percentile(resample_means, 2.5))
+
+
+def _pooled_5shot_mean(runs_by_seed: dict) -> float:
+    """3-seed mean of the pooled (all-participant) 5-shot participant-macro."""
+    per_seed = [run["aggregate"]["5shot"]["all"] for run in runs_by_seed.values()]
+    return float(np.mean(per_seed)) if per_seed else 0.0
+
+
+def _per_seed_5shot(runs_by_seed: dict) -> dict:
+    """{seed: pooled 5-shot participant-macro} for that seed's run."""
+    return {int(s): float(run["aggregate"]["5shot"]["all"])
+            for s, run in runs_by_seed.items()}
+
+
+def _pooled_per_class_recall(runs_by_seed: dict) -> dict:
+    """Pooled 5-shot per-class recall, averaged 3 ways.
+
+    For each seed we take the mean over that seed's participants of each
+    participant's per-class 5-shot recall (only participants whose queries
+    contain the class contribute); those per-seed per-class means are then
+    averaged across the seeds. Classes absent from every participant map to
+    0.0 so they cannot silently pass the gate."""
+    per_class_seed_means = {c: [] for c in CLASSES}
+    for run in runs_by_seed.values():
+        seed_class_vals = {c: [] for c in CLASSES}
+        for res in run["per_participant"].values():
+            for c, rec in res["per_class_recall_5shot"].items():
+                seed_class_vals[c].append(float(rec))
+        for c in CLASSES:
+            vals = seed_class_vals[c]
+            per_class_seed_means[c].append(float(np.mean(vals)) if vals else 0.0)
+    return {c: (float(np.mean(v)) if v else 0.0)
+            for c, v in per_class_seed_means.items()}
+
+
+def _pooled_mode_mean(runs_by_seed: dict, mode: str, subset: str = "all") -> float:
+    """3-seed mean of the pooled participant-macro for a shot mode / subset."""
+    vals = [run["aggregate"][mode][subset] for run in runs_by_seed.values()]
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def gate_report(runs_by_seed: dict, gaussian_by_seed: dict) -> dict:
+    """Compute every efficacy-gate line from per-seed nested-OOF results.
+
+    ``runs_by_seed`` maps seed -> ``nested_oof_run`` result (CNN, ``mode``
+    typically ``"cnn"``); ``gaussian_by_seed`` maps seed -> the matched
+    ``matched_gaussian_baseline`` result. Both share the per-seed shape
+    ``{"aggregate": {mode: {"all"/"avp"/"lvt", ...}}, "per_participant":
+    {pid: {"0shot"/"5shot"/"full", "per_class_recall_5shot": {cls: r}, ...}}}``.
+
+    The bootstrap is run on the seed-1729 paired per-participant 5-shot deltas
+    (CNN minus matched Gaussian) — a single, deterministic seed is chosen
+    (rather than pooling all three) so the reported 95% lower bound is exactly
+    reproducible and matches the spec's ``seeded 1729`` requirement.
+
+    Returns a dict of plain Python floats/bools with a top-level ``PASS``."""
+    pooled_mean_5shot = _pooled_5shot_mean(runs_by_seed)
+    per_seed_5shot = _per_seed_5shot(runs_by_seed)
+    per_class_recall = _pooled_per_class_recall(runs_by_seed)
+    worst_class_recall = (min(per_class_recall.values())
+                          if per_class_recall else 0.0)
+
+    # Paired per-participant 5-shot deltas on the bootstrap seed.
+    cnn_run = runs_by_seed[_BOOTSTRAP_SEED]
+    gauss_run = gaussian_by_seed[_BOOTSTRAP_SEED]
+    cnn_pp = cnn_run["per_participant"]
+    gauss_pp = gauss_run["per_participant"]
+    common = [pid for pid in cnn_pp if pid in gauss_pp]
+    deltas = np.array([cnn_pp[pid]["5shot"] - gauss_pp[pid]["5shot"]
+                       for pid in common], dtype=np.float64)
+    bootstrap_lower95 = paired_bootstrap_lower95(deltas, seed=_BOOTSTRAP_SEED)
+
+    secondaries = {
+        "pooled_mean_0shot": _pooled_mode_mean(runs_by_seed, "0shot"),
+        "pooled_mean_full": _pooled_mode_mean(runs_by_seed, "full"),
+    }
+    avp_only = {
+        "0shot": _pooled_mode_mean(runs_by_seed, "0shot", "avp"),
+        "5shot": _pooled_mode_mean(runs_by_seed, "5shot", "avp"),
+        "full": _pooled_mode_mean(runs_by_seed, "full", "avp"),
+    }
+    lvt_only = {
+        "0shot": _pooled_mode_mean(runs_by_seed, "0shot", "lvt"),
+        "5shot": _pooled_mode_mean(runs_by_seed, "5shot", "lvt"),
+        "full": _pooled_mode_mean(runs_by_seed, "full", "lvt"),
+    }
+
+    mean_ok = pooled_mean_5shot >= _THRESH_MEAN
+    seeds_ok = bool(per_seed_5shot) and all(
+        v >= _THRESH_SEED for v in per_seed_5shot.values())
+    classes_ok = bool(per_class_recall) and all(
+        v >= _THRESH_CLASS_RECALL for v in per_class_recall.values())
+    bootstrap_ok = bootstrap_lower95 > 0.0
+    verdicts = {
+        "mean_ok": bool(mean_ok),
+        "seeds_ok": bool(seeds_ok),
+        "classes_ok": bool(classes_ok),
+        "bootstrap_ok": bool(bootstrap_ok),
+        "PASS": bool(mean_ok and seeds_ok and classes_ok and bootstrap_ok),
+    }
+
+    return {
+        "seeds": [int(s) for s in runs_by_seed],
+        "bootstrap_seed": _BOOTSTRAP_SEED,
+        "n_bootstrap_participants": len(common),
+        "thresholds": {
+            "mean": _THRESH_MEAN,
+            "seed": _THRESH_SEED,
+            "class_recall": _THRESH_CLASS_RECALL,
+        },
+        "pooled_mean_5shot": pooled_mean_5shot,
+        "per_seed_5shot": per_seed_5shot,
+        "per_class_recall": per_class_recall,
+        "worst_class_recall": worst_class_recall,
+        "bootstrap_lower95": bootstrap_lower95,
+        "secondaries": secondaries,
+        "avp_only": avp_only,
+        "lvt_only": lvt_only,
+        "verdicts": verdicts,
+    }
