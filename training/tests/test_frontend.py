@@ -1,6 +1,50 @@
 import numpy as np
 from beatrice_ml.frontend import (
     resample_to_24k, mel_filterbank, logmel_patch, linear64_patch)
+from beatrice_ml.frontend import SR, TAPS, BETA, CUTOFF_SCALE
+
+
+def _resample_reference(x: np.ndarray, fs: int) -> np.ndarray:
+    """Original scalar-loop implementation of resample_to_24k, kept here as the
+    frozen reference the vectorized production version must match bit-for-bit."""
+    x = np.asarray(x, dtype=np.float64)
+    if fs == SR:
+        return x.copy()
+    ratio = SR / fs
+    cutoff = CUTOFF_SCALE * min(1.0, ratio)
+    n_out = int(np.floor(len(x) * ratio))
+    half = TAPS // 2
+    y = np.empty(n_out)
+    for n in range(n_out):
+        center = n / ratio
+        i0 = int(np.floor(center)) - half + 1
+        k = np.arange(i0, i0 + TAPS)
+        t = k - center
+        u = t / half
+        w = np.where(np.abs(u) < 1.0,
+                     np.i0(BETA * np.sqrt(np.maximum(0.0, 1.0 - u * u))) / np.i0(BETA),
+                     0.0)
+        h = cutoff * np.sinc(cutoff * t) * w
+        s = h.sum()
+        h = h / s if abs(s) > 1e-12 else h
+        seg = np.where((k >= 0) & (k < len(x)), x[np.clip(k, 0, len(x) - 1)], 0.0)
+        y[n] = float(seg @ h)
+    return y
+
+
+def test_resample_bit_identical_to_reference():
+    """Vectorized resample_to_24k must be bit-identical (not just allclose) to the
+    original scalar loop for every non-identity sample rate and several lengths."""
+    for fs in (44100, 48000, 22050):
+        for length in (2000, 2500, 3000):
+            x = np.random.default_rng(fs * 1000 + length).standard_normal(length)
+            fast = resample_to_24k(x, fs)
+            ref = _resample_reference(x, fs)
+            assert fast.shape == ref.shape
+            assert np.array_equal(fast, ref), (
+                f"resample mismatch at fs={fs} length={length}: "
+                f"max abs diff {np.abs(fast - ref).max()}")
+
 
 def test_resample_identity_at_24k():
     x = np.random.default_rng(1729).standard_normal(1000)

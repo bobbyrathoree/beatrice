@@ -14,7 +14,16 @@ SILENCE_EMAX = 1e-12
 
 def resample_to_24k(x: np.ndarray, fs: int) -> np.ndarray:
     """32-tap Kaiser-windowed sinc, beta=8.6, cutoff 0.94*min(1, 24000/fs),
-    per-output DC normalization, source coordinate = n*fs/24000."""
+    per-output DC normalization, source coordinate = n*fs/24000.
+
+    Frozen input contract (future Rust parity). This is a vectorized rewrite of
+    the original per-output scalar loop that is BIT-IDENTICAL to it: the (n_out,
+    32) index/coefficient matrices are built with the same formulas in the same
+    dtype, and each output is the same per-row ``seg @ h`` dot product the loop
+    computed (numpy's einsum/matmul use pairwise/blocked summation that is NOT
+    bit-identical, so the output is assembled row-by-row with ``@`` over the
+    precomputed arrays — see ``test_frontend._resample_reference``).
+    """
     x = np.asarray(x, dtype=np.float64)
     if fs == SR:
         return x.copy()
@@ -22,21 +31,28 @@ def resample_to_24k(x: np.ndarray, fs: int) -> np.ndarray:
     cutoff = CUTOFF_SCALE * min(1.0, ratio)
     n_out = int(np.floor(len(x) * ratio))
     half = TAPS // 2
+
+    center = np.arange(n_out, dtype=np.float64) / ratio      # exact source coords
+    i0 = np.floor(center).astype(np.int64) - half + 1
+    k = i0[:, None] + np.arange(TAPS, dtype=np.int64)[None, :]  # (n_out, 32)
+    t = k - center[:, None]                                  # in [-16, 16)
+    u = t / half
+    # Kaiser window, np.i0 vectorized over all rows at once.
+    w = np.where(np.abs(u) < 1.0,
+                 np.i0(BETA * np.sqrt(np.maximum(0.0, 1.0 - u * u))) / np.i0(BETA),
+                 0.0)
+    h = cutoff * np.sinc(cutoff * t) * w                     # (n_out, 32)
+    s = h.sum(axis=1)
+    norm = np.abs(s) > 1e-12
+    # Per-output DC normalization; rows with ~zero sum keep h unchanged.
+    h[norm] = h[norm] / s[norm, None]
+    seg = np.where((k >= 0) & (k < len(x)), x[np.clip(k, 0, len(x) - 1)], 0.0)
+
+    # Same-ordered per-row dot product as the original ``float(seg @ h)`` loop
+    # (bit-identical; einsum/matmul reductions are not — verified in tests).
     y = np.empty(n_out)
     for n in range(n_out):
-        center = n / ratio                      # exact source coordinate
-        i0 = int(np.floor(center)) - half + 1
-        k = np.arange(i0, i0 + TAPS)
-        t = k - center                          # in [-16, 16)
-        u = t / half
-        w = np.where(np.abs(u) < 1.0,
-                     np.i0(BETA * np.sqrt(np.maximum(0.0, 1.0 - u * u))) / np.i0(BETA),
-                     0.0)
-        h = cutoff * np.sinc(cutoff * t) * w
-        s = h.sum()
-        h = h / s if abs(s) > 1e-12 else h
-        seg = np.where((k >= 0) & (k < len(x)), x[np.clip(k, 0, len(x) - 1)], 0.0)
-        y[n] = float(seg @ h)
+        y[n] = seg[n] @ h[n]
     return y
 
 def _hz_to_mel(f):

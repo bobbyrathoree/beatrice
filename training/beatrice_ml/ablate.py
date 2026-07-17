@@ -52,7 +52,6 @@ all six variants including the linear64 and cap_next_onset code paths.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import csv
 import json
 import logging
@@ -64,7 +63,6 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from . import frontend, patches
 from .evaluate import (
     CLASSES,
     _assert_not_test,
@@ -108,24 +106,6 @@ def _pct(x: float) -> float:
     return round(float(x) * 100.0, 4)
 
 
-@contextlib.contextmanager
-def _frontend_override(patch_fn):
-    """Temporarily swap the frontend that build_patch_cache calls.
-
-    ``build_patch_cache`` (a consume-only interface we must not modify) resolves
-    ``logmel_patch`` as a module global, so swapping ``patches.logmel_patch`` for
-    ``frontend.linear64_patch`` lets us reuse the exact augmentation/caching loop
-    for the linear64 frontend without duplicating it. ``linear64_patch`` has the
-    same signature and output contract ((n_bins, F) float32 in [0, 1]).
-    """
-    original = patches.logmel_patch
-    patches.logmel_patch = patch_fn
-    try:
-        yield
-    finally:
-        patches.logmel_patch = original
-
-
 def _load_manifest(path: Path) -> list[dict]:
     with open(path, newline="") as f:
         return list(csv.DictReader(f))
@@ -146,19 +126,21 @@ def _build_variant_cache(variant: dict, manifest_rows, roots, cache_participants
                          cache_dir: Path, copies: int) -> Path:
     """Build the per-variant npz patch cache (distinct filename per variant)."""
     cache = cache_dir / f"patches_{variant['name']}.npz"
-    patch_fn = (frontend.linear64_patch if variant["frontend"] == "linear64"
-                else frontend.logmel_patch)
+    # Pass the frontend kind explicitly so each worker resolves the patch
+    # function locally — robust across fork AND spawn start methods (a parent
+    # module-global swap is inherited by fork but NOT by spawn).
+    frontend_kind = variant["frontend"]  # "mel64" | "linear64"
     logger.info("building cache %s (frontend=%s crop=(%.3f,%.3f) cap=%s copies=%d)",
-                cache.name, variant["frontend"], variant["pre_s"],
+                cache.name, frontend_kind, variant["pre_s"],
                 variant["post_s"], variant["cap"], copies)
-    with _frontend_override(patch_fn):
-        build_patch_cache(
-            manifest_rows, roots, cache,
-            crop=(variant["pre_s"], variant["post_s"]),
-            copies=copies, seed=SEED,
-            participants=cache_participants,
-            cap_next_onset=variant["cap"],
-        )
+    build_patch_cache(
+        manifest_rows, roots, cache,
+        crop=(variant["pre_s"], variant["post_s"]),
+        copies=copies, seed=SEED,
+        participants=cache_participants,
+        cap_next_onset=variant["cap"],
+        frontend_kind=frontend_kind,
+    )
     return cache
 
 
