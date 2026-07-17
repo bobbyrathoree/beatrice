@@ -1,0 +1,12 @@
+{
+  "version": "avplvt_v1",
+  "test_participants": ["avp:9", "avp:11", "avp:19", "avp:24",
+                        "lvt:AFR", "lvt:Cra", "lvt:Isa", "lvt:Mar"],
+  "dev_outer_folds": {
+    "F1": ["avp:6", "avp:15", "avp:16", "avp:27", "avp:28", "lvt:JSi", "lvt:Cat", "lvt:JOl"],
+    "F2": ["avp:5", "avp:17", "avp:20", "avp:25", "avp:26", "lvt:Cav", "lvt:Bea", "lvt:Sof"],
+    "F3": ["avp:4", "avp:7", "avp:10", "avp:12", "avp:22", "lvt:Ric", "lvt:Nor", "lvt:JoS"],
+    "F4": ["avp:1", "avp:3", "avp:8", "avp:14", "avp:21", "lvt:Zga", "lvt:Rob", "lvt:AZi"],
+    "F5": ["avp:2", "avp:13", "avp:18", "avp:23", "lvt:Maf", "lvt:MCo", "lvt:Bic", "lvt:Ziz"]
+  }
+}
