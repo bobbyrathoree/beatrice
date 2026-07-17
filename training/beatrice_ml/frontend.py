@@ -69,15 +69,50 @@ def crop_samples(x24: np.ndarray, onset_s: float, pre_s: float, post_s: float) -
         out[lo - start:hi - start] = x24[lo:hi]
     return out
 
-def logmel_patch(x24: np.ndarray, onset_s: float,
-                 pre_s: float = 0.025, post_s: float = 0.125) -> np.ndarray:
-    crop = crop_samples(np.asarray(x24, dtype=np.float64), onset_s, pre_s, post_s)
+N_LINEAR = 64  # first 64 rFFT power bins for the linear64 frontend variant
+
+
+def _framed_power(crop: np.ndarray) -> tuple[np.ndarray, int]:
+    """Windowed STFT power spectrum of a raw crop.
+
+    Returns ``(power (n_frames, 301), n_frames)`` — the shared front half of both
+    the mel and linear patch pipelines.
+    """
     n_frames = (len(crop) - N_FFT) // HOP + 1
     frames = np.stack([crop[i * HOP:i * HOP + N_FFT] * _WIN for i in range(n_frames)])
     power = np.abs(np.fft.rfft(frames, axis=1)) ** 2          # (n_frames, 301)
-    mel = power @ _FB.T                                        # (n_frames, 64)
-    emax = mel.max()
+    return power, n_frames
+
+
+def _normalize_patch(energy: np.ndarray, n_bins: int, n_frames: int) -> np.ndarray:
+    """Relative-peak / -50 dB log normalization shared by both frontends.
+
+    ``energy`` is (n_frames, n_bins); returns a (n_bins, n_frames) float32 patch
+    in [0, 1], or all-zeros when the crop is silent (max energy below floor).
+    """
+    emax = energy.max() if energy.size else 0.0
     if emax < SILENCE_EMAX:
-        return np.zeros((N_MELS, n_frames), dtype=np.float32)
-    db = np.clip(10.0 * np.log10(np.maximum(mel, 1e-12) / emax), LOG_FLOOR_DB, 0.0)
-    return ((db - LOG_FLOOR_DB) / -LOG_FLOOR_DB).T.astype(np.float32)  # (64, n_frames)
+        return np.zeros((n_bins, n_frames), dtype=np.float32)
+    db = np.clip(10.0 * np.log10(np.maximum(energy, 1e-12) / emax), LOG_FLOOR_DB, 0.0)
+    return ((db - LOG_FLOOR_DB) / -LOG_FLOOR_DB).T.astype(np.float32)  # (n_bins, n_frames)
+
+
+def logmel_patch(x24: np.ndarray, onset_s: float,
+                 pre_s: float = 0.025, post_s: float = 0.125) -> np.ndarray:
+    crop = crop_samples(np.asarray(x24, dtype=np.float64), onset_s, pre_s, post_s)
+    power, n_frames = _framed_power(crop)
+    mel = power @ _FB.T                                        # (n_frames, 64)
+    return _normalize_patch(mel, N_MELS, n_frames)
+
+
+def linear64_patch(x24: np.ndarray, onset_s: float,
+                   pre_s: float = 0.025, post_s: float = 0.125) -> np.ndarray:
+    """First 64 rFFT power bins with the SAME relative-peak / -50 dB
+    normalization pipeline as ``logmel_patch`` (a distinct frontend, not a flag).
+
+    Returns a ``(64, n_frames)`` float32 patch in [0, 1], all-zeros on silence.
+    """
+    crop = crop_samples(np.asarray(x24, dtype=np.float64), onset_s, pre_s, post_s)
+    power, n_frames = _framed_power(crop)
+    lin = power[:, :N_LINEAR]                                 # (n_frames, 64)
+    return _normalize_patch(lin, N_LINEAR, n_frames)

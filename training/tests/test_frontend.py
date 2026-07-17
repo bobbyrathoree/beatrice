@@ -1,5 +1,6 @@
 import numpy as np
-from beatrice_ml.frontend import resample_to_24k, mel_filterbank, logmel_patch
+from beatrice_ml.frontend import (
+    resample_to_24k, mel_filterbank, logmel_patch, linear64_patch)
 
 def test_resample_identity_at_24k():
     x = np.random.default_rng(1729).standard_normal(1000)
@@ -41,3 +42,15 @@ def test_crop_zero_pads_at_boundaries():
 def test_determinism():
     x = np.random.default_rng(2718).standard_normal(24000)
     assert np.array_equal(logmel_patch(x, 0.3), logmel_patch(x, 0.3))
+
+def test_linear64_shape_and_range():
+    rng = np.random.default_rng(1729)
+    x = rng.standard_normal(24000)
+    p = linear64_patch(x, onset_s=0.5)                  # default crop
+    assert p.shape == (64, 13) and p.dtype == np.float32
+    assert p.min() >= 0.0 and p.max() <= 1.0
+    assert np.isclose(p.max(), 1.0)                     # relative peak -> max bin hits 1
+
+def test_linear64_silence_all_zero():
+    p = linear64_patch(np.zeros(24000), onset_s=0.5)
+    assert (p == 0).all()
