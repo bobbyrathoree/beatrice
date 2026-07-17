@@ -436,3 +436,9 @@ osascript -e "get volume settings"   # confirm output NOT muted, volume up
 node scripts/measure-latency.mjs              # acoustic loopback (gate number)
 node scripts/measure-latency.mjs --synthetic  # compute + deferral floor
 ```
+
+> **Update (2026-07-16):** the streaming classification window is now 150 ms
+> (`HYBRID_MFCC_WINDOW_MS` — the hybrid Gaussian classifier's training window),
+> up from the 100 ms these runs were measured with. The detector-floor and
+> mouth-to-sound numbers above therefore *understate* the current deferral by
+> ~50 ms. The NO-GO verdict is unaffected (it already failed at 100 ms).

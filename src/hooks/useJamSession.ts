@@ -34,7 +34,7 @@ export interface JamLiveEvent {
   key: number;
   /** onset time relative to stream start (ms) */
   tMs: number;
-  /** classified EventClass id (post-toggle: reflects HEURISTIC or YOURS) */
+  /** classified EventClass id (post-toggle: reflects FACTORY or YOURS) */
   classId: JamClassId;
   /** classification confidence [0,1] */
   conf: number;
@@ -64,7 +64,7 @@ export interface JamSession {
    * true when start() re-seeded the live detector with a SUFFICIENT persisted
    * profile (≥5 samples for all 4 classes). The returning user's calibration is
    * usable immediately — the panel opens in its `restored` state so the
-   * HEURISTIC/YOURS toggle works without re-teaching. false when there was no
+   * FACTORY/YOURS toggle works without re-teaching. false when there was no
    * usable persisted profile (fresh session).
    */
   calibrationRestored: boolean;

@@ -79,11 +79,14 @@ and a reproducible run against the published AVP benchmark (see
 
 For a defensible accuracy number, Beatrice ships a runner that measures its
 classifier against the **AVP ("Amateur Vocal Percussion") dataset** (Delgado et
-al., Zenodo, CC-BY) — 28 participants, ~9,780 annotated utterances, using the
-*exact same 4-class taxonomy* Beatrice targets. Published lineage for context:
-the SOTA on AVP is ≈0.90 (a personalized CNN + kNN); a classical MFCC + kNN
-baseline lands around ≈0.84. Beatrice's rule-based classifier is measured
-honestly here — whatever it scores, it scores.
+al., Zenodo, CC-BY) — 28 participants, ~9,780 annotated utterances. AVP's
+native taxonomy is kick / snare / closed hi-hat / *open* hi-hat; Beatrice has
+no open-hat class (both hats fold into HihatNoise) and its fourth class,
+HumVoiced, does not exist in AVP — so this benchmark is effectively a
+**3-way percussion task**, and published AVP numbers (the ≈0.90 personalized
+CNN SOTA, the ≈0.84 classical MFCC + kNN baseline) are measured on the native
+4-class task and are not directly comparable. Beatrice's classifier is
+measured honestly here — whatever it scores, it scores.
 
 **The dataset is not bundled** (it is large and separately licensed). Download
 it from Zenodo, extract it, and point the runner at the folder.
@@ -169,8 +172,9 @@ diagonal-covariance Gaussian classifier fitted on all 28 AVP participants
 a sustained-signal gate (crest < 2.2 ∧ zcr < 0.15, 0.04% false-fire on AVP)
 routing hums to the heuristic since AVP has no hum class. Calibration is MAP
 mean adaptation — 5 labeled samples per class shift the factory means about a
-third of the way toward the user's voice — worth +1.9 points and, unlike the
-retired kNN, it never *degrades* the factory model.
+third of the way toward the user's voice — worth +1.9 points on average
+(participant-wise; individual participants can still lose accuracy, which the
+tau=10 prior bounds but does not eliminate).
 
 **Honest read.** The Gaussian numbers are leave-one-participant-out: each
 participant is scored by a model that never saw their voice. 81.6% sits above
@@ -247,11 +251,12 @@ that lags. Full numbers, methodology, and the 3-run re-measure are in
 ### The flow: calibrate → jam → capture → export
 
 1. **Calibrate (optional, ~20s).** Hit TEACH and make each of your 4 sounds 5×.
-   Beatrice builds a per-voice kNN profile so *your* "tss" reads as a hi-hat even
-   if the generic heuristic disagrees. A HEURISTIC/YOURS toggle flips
-   classification live — you **see** subsequent tiles change color as your
-   profile takes over. The profile persists across sessions (localStorage; also
-   registered with the native backend so the offline pipeline uses it too).
+   Beatrice MAP-adapts its factory Gaussian model toward *your* voice, so your
+   "tss" reads as a hi-hat even if the stock model disagrees. A FACTORY/YOURS
+   toggle flips classification live — you **see** subsequent tiles change color
+   as your profile takes over. The profile persists across sessions
+   (localStorage; also registered with the native backend so the offline
+   pipeline personalizes with it too).
 2. **Jam (~30s).** Beatbox. Sounds flash as they're detected.
 3. **Capture.** The last few seconds of mic audio are encoded to WAV.
 4. **Arrange.** That WAV runs through the exact same pipeline as an upload —

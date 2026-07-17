@@ -2,7 +2,7 @@
 //
 // [GATE-FAIL adaptation] Jam mode is VISUAL (no live synth), so the A/B toggle
 // lets the user SEE the accuracy difference rather than hear it: flipping
-// HEURISTIC/YOURS changes how subsequent detected events are classified, which
+// FACTORY/YOURS changes how subsequent detected events are classified, which
 // changes the flash tiles' colors/labels in JamScreen. Same mechanism the brief
 // describes ("users hear the accuracy difference"), honestly reframed to what a
 // visual jam can actually show.
@@ -39,12 +39,12 @@ interface CalibrationPanelProps {
   /**
    * true when the session re-seeded a SUFFICIENT persisted profile onto the
    * worklet at start. The panel then opens in its `restored` state so the
-   * HEURISTIC/YOURS toggle works immediately, without re-teaching (Finding 1).
+   * FACTORY/YOURS toggle works immediately, without re-teaching (Finding 1).
    */
   calibrationRestored: boolean;
   /** Echo a labeled sample to the worklet. */
   onSample: (classId: JamClassId, features: number[]) => void;
-  /** Flip the live HEURISTIC/YOURS toggle. */
+  /** Flip the live FACTORY/YOURS toggle. */
   onToggle: (enabled: boolean) => void;
   /**
    * Clear the worklet's live calibration profile. Called when a re-teach begins
@@ -65,7 +65,7 @@ export function CalibrationPanel({
   onClose,
 }: CalibrationPanelProps) {
   const [state, dispatch] = useReducer(calibrationReducer, INITIAL_CALIBRATION_STATE);
-  // true = YOURS (personal), false = HEURISTIC. Starts on HEURISTIC.
+  // true = YOURS (personal), false = FACTORY. Starts on FACTORY.
   const [personal, setPersonal] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -115,7 +115,7 @@ export function CalibrationPanel({
     onResetCalibration();
     samplesRef.current = [];
     lastKeyRef.current = latestEvent?.key ?? null; // don't consume a stale event
-    setPersonal(false); // re-teaching starts on HEURISTIC until done re-enables
+    setPersonal(false); // re-teaching starts on FACTORY until done re-enables
     setSaved(false);
     dispatch({ type: "START" });
   };
@@ -155,7 +155,7 @@ export function CalibrationPanel({
         <>
           <p style={{ color: "#aaa", fontSize: 13, margin: 0 }}>
             Teach Beatrice YOUR four sounds — make each one {SAMPLES_PER_CLASS}×. Then flip
-            HEURISTIC / YOURS to see the tiles re-classify with your voice.
+            FACTORY / YOURS to see the tiles re-classify with your voice.
           </p>
           <button
             className="btn btn-primary"
@@ -262,7 +262,7 @@ export function CalibrationPanel({
             border: "3px solid #000",
           }}
         >
-          {personal ? "YOURS ●" : "HEURISTIC ●"} — tap to flip
+          {personal ? "YOURS ●" : "FACTORY ●"} — tap to flip
         </button>
       )}
 

@@ -52,7 +52,7 @@ export function JamScreen({ onProjectCreated, onError, onExit }: JamScreenProps)
   }, [error, onError]);
 
   // Returning session: if start() re-seeded a sufficient saved profile, open the
-  // calibration panel so the live HEURISTIC/YOURS toggle is reachable right away
+  // calibration panel so the live FACTORY/YOURS toggle is reachable right away
   // (Finding 1) — otherwise the returning user would have to hunt for TEACH to
   // activate a profile they already trained.
   useEffect(() => {
