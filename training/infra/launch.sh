@@ -96,7 +96,7 @@ SG_ID=$(aws ec2 describe-security-groups \
 if [ "$SG_ID" = "None" ] || [ -z "$SG_ID" ]; then
   log "creating security group $SG_NAME (zero ingress)"
   SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" \
-    --description "beatrice training — zero ingress, SSM only" \
+    --description "beatrice training - zero ingress, SSM only" \
     --query 'GroupId' --output text)
 else
   log "security group $SG_NAME present ($SG_ID)"
