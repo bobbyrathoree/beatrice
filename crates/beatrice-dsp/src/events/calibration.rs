@@ -6,6 +6,15 @@ use std::collections::HashMap;
 
 use crate::events::types::{EventClass, EventFeatures};
 
+/// Current calibration profile schema version. v1 = pre-MFCC (7 scalar
+/// features only); v2 = samples carry 20 mean MFCCs for Gaussian MAP
+/// adaptation. Absent version key deserializes as 1 (legacy).
+pub const PROFILE_VERSION: u32 = 2;
+
+fn default_profile_version() -> u32 {
+    1
+}
+
 /// A single calibration sample from the user
 /// Contains features and raw audio window for potential future training
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +108,14 @@ impl CalibrationSample {
     pub fn gaussian_vec(&self) -> Vec<f32> {
         crate::events::gaussian::gaussian_features(&self.features, &self.mfcc)
     }
+
+    /// Whether this sample carries the full MFCC vector the Gaussian MAP
+    /// adaptation needs. Legacy (v1) samples have an empty `mfcc`; adapting
+    /// from their zero-padded vectors would drag the class means toward a
+    /// spurious all-MFCC-zero point, so consumers must skip them.
+    pub fn has_mfcc(&self) -> bool {
+        self.mfcc.len() == crate::features::MFCC_COEFFS
+    }
 }
 
 /// User calibration profile containing samples for all event classes
@@ -111,7 +128,9 @@ pub struct CalibrationProfile {
     /// Samples grouped by event class
     pub samples: HashMap<EventClass, Vec<CalibrationSample>>,
 
-    /// Profile version for future compatibility
+    /// Profile schema version ([`PROFILE_VERSION`]). `serde(default)` maps a
+    /// missing key to 1 (legacy, pre-MFCC) instead of failing to load.
+    #[serde(default = "default_profile_version")]
     pub version: u32,
 
     /// Creation timestamp (ISO 8601)
@@ -129,7 +148,7 @@ impl CalibrationProfile {
         CalibrationProfile {
             name,
             samples: HashMap::new(),
-            version: 1,
+            version: PROFILE_VERSION,
             created_at: Some(chrono::Utc::now().to_rfc3339()),
             notes: None,
         }
@@ -360,6 +379,25 @@ mod tests {
         let (class, confidence) = result.unwrap();
         assert_eq!(class, EventClass::BilabialPlosive);
         assert!(confidence > 0.5);
+    }
+
+    #[test]
+    fn profile_without_version_key_still_loads() {
+        // Legacy profiles predate the version field; serde must default, not fail.
+        let json = br#"{"name":"old","samples":{}}"#;
+        let p = CalibrationProfile::from_json_bytes(json).expect("legacy profile must load");
+        assert_eq!(p.version, 1, "absent version key means schema v1");
+    }
+
+    #[test]
+    fn has_mfcc_requires_full_vector() {
+        let f = create_test_features(1000.0, 0.1);
+        let legacy = CalibrationSample::with_mfcc(EventClass::Click, f.clone(), vec![], vec![], 44100);
+        assert!(!legacy.has_mfcc());
+        let partial = CalibrationSample::with_mfcc(EventClass::Click, f.clone(), vec![0.1; 5], vec![], 44100);
+        assert!(!partial.has_mfcc());
+        let full = CalibrationSample::with_mfcc(EventClass::Click, f, vec![0.1; 20], vec![], 44100);
+        assert!(full.has_mfcc());
     }
 
     #[test]

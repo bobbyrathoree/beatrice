@@ -332,6 +332,7 @@ impl StreamingDetector {
                 .samples
                 .values()
                 .flatten()
+                .filter(|s| s.has_mfcc()) // legacy MFCC-less samples poison MAP
                 .map(|s| (s.class, s.gaussian_vec()))
                 .collect();
             Some(HybridClassifier::with_adaptation(&samples))
@@ -750,7 +751,13 @@ mod tests {
 
     fn teach(det: &mut StreamingDetector, class: EventClass, f: EventFeatures) {
         for _ in 0..5 {
-            det.add_calibration_sample(CalibrationSample::new(class, f.clone(), vec![], 44_100));
+            det.add_calibration_sample(CalibrationSample::with_mfcc(
+                class,
+                f.clone(),
+                vec![0.0; crate::features::MFCC_COEFFS],
+                vec![],
+                44_100,
+            ));
         }
     }
 
@@ -850,12 +857,23 @@ mod tests {
         // The brief's Step-1 shape: a pre-built sufficient profile makes the
         // detector personalized out of the gate — identical to teaching the
         // same samples live.
+        // Mirror teach(): full zero-MFCC vectors so the seeded samples pass the
+        // has_mfcc() MAP filter exactly as the live-taught ones do.
         let mut profile = CalibrationProfile::new("test".into());
+        let seed = |p: &mut CalibrationProfile, class: EventClass, f: EventFeatures| {
+            p.add_sample(CalibrationSample::with_mfcc(
+                class,
+                f,
+                vec![0.0; crate::features::MFCC_COEFFS],
+                vec![],
+                44_100,
+            ));
+        };
         for _ in 0..5 {
-            profile.add_sample(CalibrationSample::new(EventClass::Click, hihat_like(), vec![], 44_100));
-            profile.add_sample(CalibrationSample::new(EventClass::BilabialPlosive, kick_like(), vec![], 44_100));
-            profile.add_sample(CalibrationSample::new(EventClass::HihatNoise, other_hat(), vec![], 44_100));
-            profile.add_sample(CalibrationSample::new(EventClass::HumVoiced, hum_like(), vec![], 44_100));
+            seed(&mut profile, EventClass::Click, hihat_like());
+            seed(&mut profile, EventClass::BilabialPlosive, kick_like());
+            seed(&mut profile, EventClass::HihatNoise, other_hat());
+            seed(&mut profile, EventClass::HumVoiced, hum_like());
         }
         let (pf, pm) = probe();
         let seeded = StreamingDetector::with_profile(44_100, profile);
@@ -871,6 +889,33 @@ mod tests {
         // And it differs from factory (the profile actually took effect).
         let factory = StreamingDetector::new(44_100);
         assert!(seeded.classify(&pf, &pm) != factory.classify(&pf, &pm));
+    }
+
+    #[test]
+    fn mfccless_legacy_samples_never_adapt_the_model() {
+        // A sufficient profile of LEGACY (empty-mfcc) samples must leave the
+        // model at factory — zero-MFCC vectors poison the MAP means otherwise.
+        let (pf, pm) = probe();
+        let mut det = StreamingDetector::new(44_100);
+        let factory_verdict = det.classify(&pf, &pm);
+        det.set_calibration_enabled(true);
+        for (class, f) in [
+            (EventClass::Click, hihat_like()),
+            (EventClass::BilabialPlosive, kick_like()),
+            (EventClass::HihatNoise, other_hat()),
+            (EventClass::HumVoiced, hum_like()),
+        ] {
+            for _ in 0..5 {
+                // ::new with empty raw_window derives an EMPTY mfcc (legacy shape)
+                det.add_calibration_sample(CalibrationSample::new(class, f.clone(), vec![], 44_100));
+            }
+        }
+        assert!(det.is_calibration_sufficient());
+        assert_eq!(
+            det.classify(&pf, &pm),
+            factory_verdict,
+            "legacy samples must not move the adapted model off factory"
+        );
     }
 
     #[test]

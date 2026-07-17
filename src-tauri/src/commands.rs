@@ -499,6 +499,7 @@ pub async fn detect_events(
                 .samples
                 .values()
                 .flatten()
+                .filter(|s| s.has_mfcc()) // legacy MFCC-less samples poison MAP
                 .map(|s| (s.class, s.gaussian_vec()))
                 .collect();
             events::HybridClassifier::with_adaptation(&samples)

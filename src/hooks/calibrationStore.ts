@@ -106,7 +106,9 @@ export function buildProfileJson(name: string, samples: CalibrationSampleInput[]
   return JSON.stringify({
     name,
     samples: grouped,
-    version: 1,
+    // Schema v2: every sample carries its 20 mean MFCCs for Gaussian MAP
+    // adaptation (mirrors Rust PROFILE_VERSION).
+    version: 2,
     created_at: new Date().toISOString(),
   });
 }

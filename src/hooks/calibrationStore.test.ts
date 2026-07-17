@@ -19,7 +19,7 @@ describe("buildProfileJson", () => {
     const json = buildProfileJson("me", [sample(0), sample(0), sample(1)]);
     const parsed = JSON.parse(json);
     expect(parsed.name).toBe("me");
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     // Grouped under the Rust variant names.
     expect(parsed.samples.BilabialPlosive).toHaveLength(2);
     expect(parsed.samples.HihatNoise).toHaveLength(1);
