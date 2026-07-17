@@ -50,6 +50,24 @@ describe("mock <-> bindings parity", () => {
     expect(typeof arr.total_duration_ms).toBe("number");
   });
 
+  it("detect_events with calibration flags mirrors the Rust contract", async () => {
+    const { commands, unwrap } = await import("./types/ipc");
+    const bytes = new Array(44 + 44100 * 2 * 2).fill(0);
+    const project = unwrap(await commands.createProject({ name: "Cal", input_data: bytes }));
+    // Valid id → events flow (mock has no real profiles; it only checks shape).
+    const det = unwrap(await commands.detectEvents({
+      file_path: project.input_path, run_id: null,
+      use_calibration: true, calibration_profile_id: "mock-cal-1",
+    }));
+    expect(det.events.length).toBeGreaterThan(0);
+    // Flag without id → rejects, same as the Rust command.
+    const bad = await commands.detectEvents({
+      file_path: project.input_path, run_id: null,
+      use_calibration: true, calibration_profile_id: null,
+    });
+    expect(bad.status).toBe("error");
+  });
+
   it("contract drift: missing camelCase key rejects (throws)", async () => {
     const mock = await import("./utils/tauri-mock");
     // list_runs_for_project requires `projectId` (camelCase). snake_case must throw.

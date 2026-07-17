@@ -29,6 +29,7 @@ import { PlaybackControls } from "./components/PlaybackControls";
 import { SessionSidebar } from "./components/SessionSidebar";
 import { JamScreen } from "./components/Jam/JamScreen";
 import { useAudioPlayback } from "./hooks/useAudioPlayback";
+import { loadActiveProfileId, saveActiveProfileId } from "./hooks/calibrationStore";
 import type { Project, Run } from "./store/useStore";
 import type { ProjectSummary } from "./hooks/useProjects";
 import type { EventDecision } from "./types/explainability";
@@ -205,19 +206,39 @@ function App() {
     setProcessingProgress(0);
 
     try {
-      // Step 1: Detect events (Rust reads from disk via file_path)
+      // Step 1: Detect events (Rust reads from disk via file_path).
+      // If the user taught Beatrice their voice (jam TEACH), personalize the
+      // offline pipeline with their MAP-adapted profile; if the profile has
+      // since been deleted, drop the stale id and fall back to factory.
       setProcessingProgress(0.1);
-      const eventResult = await commands
-        .detectEvents({
-          file_path: _project.input_path,
-          run_id: null,
-          use_calibration: false,
-          calibration_profile_id: null,
-        })
-        .then(unwrap)
-        .catch((err) => {
-          throw new Error(`Event detection failed: ${formatIpcError(err)}`);
-        });
+      const detectWith = (profileId: string | null) =>
+        commands
+          .detectEvents({
+            file_path: _project.input_path,
+            run_id: null,
+            use_calibration: !!profileId,
+            calibration_profile_id: profileId,
+          })
+          .then(unwrap);
+
+      const activeProfileId = loadActiveProfileId();
+      let eventResult;
+      try {
+        eventResult = await detectWith(activeProfileId);
+      } catch (err) {
+        const msg = formatIpcError(err);
+        if (activeProfileId && /calibration profile/i.test(msg)) {
+          // Stale profile (deleted, unreadable, or unparseable) — clear it and
+          // rerun uncalibrated rather than failing the whole pipeline.
+          console.warn(`Calibration profile unusable (${msg}); falling back to factory.`);
+          saveActiveProfileId(null);
+          eventResult = await detectWith(null).catch((err2) => {
+            throw new Error(`Event detection failed: ${formatIpcError(err2)}`);
+          });
+        } else {
+          throw new Error(`Event detection failed: ${msg}`);
+        }
+      }
 
       if (!eventResult?.events?.length) {
         throw new Error("No events detected in audio. Try recording a longer or louder sample.");

@@ -333,6 +333,15 @@ const HANDLERS: Record<string, Handler> = {
   // --- Event detection (match Rust EventDetectionResult) ---
   detect_events: (a) => {
     requireKeys(a, ['input']);
+    // Mirror the Rust contract: the flag without an id is an error. The mock
+    // has no profile store, so a present id simply passes through (the mock's
+    // events are fabricated either way).
+    if (a.input?.use_calibration && !a.input?.calibration_profile_id) {
+      // Reject like real Tauri: a serialized CommandError value (NOT an Error
+      // instance), so the generated binding maps it to {status:"error"} rather
+      // than rethrowing.
+      throw { message: 'Calibration profile ID required when use_calibration is true' };
+    }
     // In mock mode, generate events from stored audio data (saved by create_project)
     const storedData = lastProjectAudioData ? Array.from(lastProjectAudioData) : [];
     const events = generateMockEvents(storedData);

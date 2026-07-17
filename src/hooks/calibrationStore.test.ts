@@ -6,6 +6,8 @@ import {
   clearCalibrationSamples,
   isCalibrationSufficient,
   MIN_SAMPLES_PER_CLASS,
+  saveActiveProfileId,
+  loadActiveProfileId,
   type CalibrationSampleInput,
 } from "./calibrationStore";
 
@@ -70,6 +72,13 @@ describe("localStorage round-trip", () => {
   it("survives non-array garbage", () => {
     localStorage.setItem("beatrice.calibration.v1", "{}");
     expect(loadCalibrationSamples()).toBeNull();
+  });
+
+  it("active profile id round-trips and clears", () => {
+    saveActiveProfileId("abc-123");
+    expect(loadActiveProfileId()).toBe("abc-123");
+    saveActiveProfileId(null);
+    expect(loadActiveProfileId()).toBeNull();
   });
 });
 

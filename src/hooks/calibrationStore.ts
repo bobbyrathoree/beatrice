@@ -64,6 +64,34 @@ export function isCalibrationSufficient(
 
 /** localStorage key (versioned so a shape change can't crash on stale data). */
 const LS_KEY = "beatrice.calibration.v1";
+
+/** localStorage key for the ACTIVE native profile id — the profile the
+ * offline pipeline (detect_events use_calibration) personalizes with. Set
+ * when a teach flow registers a profile natively; cleared if the backend
+ * reports the profile missing. Browser mock never sets it (persistCalibration
+ * returns null there), so the mock pipeline stays uncalibrated. */
+const ACTIVE_PROFILE_KEY = "beatrice.calibration.activeProfileId";
+
+/** Remember (or clear, with null) the active native calibration profile id. */
+export function saveActiveProfileId(id: string | null): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (id) localStorage.setItem(ACTIVE_PROFILE_KEY, id);
+    else localStorage.removeItem(ACTIVE_PROFILE_KEY);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** The active native profile id, or null when none was registered. */
+export function loadActiveProfileId(): string | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    return localStorage.getItem(ACTIVE_PROFILE_KEY);
+  } catch {
+    return null;
+  }
+}
 const SAMPLE_RATE = 44100;
 
 /** Map the leading 7 floats to the Rust `EventFeatures` JSON object. */
@@ -178,6 +206,9 @@ export async function persistCalibration(
         notes: null,
       })
     );
+    // The freshly taught profile becomes the offline pipeline's active
+    // personalization (detect_events use_calibration path).
+    saveActiveProfileId(profile.id);
     return profile.id;
   } catch {
     // DB write failed (or command missing) — localStorage cache still stands.
