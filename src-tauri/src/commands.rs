@@ -524,12 +524,13 @@ pub async fn detect_events(
             audio.duration_ms as f64 - onset.timestamp_ms
         };
 
-        // Dynamic feature window based on onset-to-onset distance, clamped [50ms, 500ms]
-        let window_duration_ms = duration_ms.clamp(50.0, 500.0);
-
-        // Extract features for this onset
-        let features =
-            audio::extract_features_for_window(&audio, onset.timestamp_ms, window_duration_ms);
+        // Scalar features over the fixed window the factory model was fitted
+        // with (matches analyze_offline_hybrid and the streaming detector).
+        let features = audio::extract_features_for_window(
+            &audio,
+            onset.timestamp_ms,
+            events::hybrid::HYBRID_MFCC_WINDOW_MS,
+        );
 
         // MFCCs over the fixed window the factory model was fitted with.
         let start = ((onset.timestamp_ms / 1000.0) * audio.sample_rate as f64) as usize;

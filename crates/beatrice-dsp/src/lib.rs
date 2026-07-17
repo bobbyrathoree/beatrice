@@ -69,11 +69,13 @@ pub fn analyze_offline(audio: &AudioData, cfg: &OnsetConfig) -> Vec<Event> {
 /// classification path since the AVP benchmark showed it at 81.6%
 /// participant-wise vs 65.8% for the pure heuristic.
 ///
-/// Same onset/duration/feature logic as [`analyze_offline`]; classification
-/// additionally extracts MFCCs over a fixed
-/// [`events::hybrid::HYBRID_MFCC_WINDOW_MS`] window (matching the window the
-/// factory model was fitted with). [`analyze_offline`] (heuristic) remains for
-/// the golden freeze tests, which pin the extraction refactor.
+/// Same onset/duration logic as [`analyze_offline`], but the classifier's
+/// scalar features AND MFCCs are both extracted over a fixed
+/// [`events::hybrid::HYBRID_MFCC_WINDOW_MS`] window — the window the factory
+/// model was fitted with and the streaming path uses. (The heuristic
+/// [`analyze_offline`] keeps the variable gap-to-next-onset feature window; its
+/// golden freeze tests pin the extraction refactor, so it must not change.)
+/// `Event.duration_ms` still reports the musical gap to the next onset.
 pub fn analyze_offline_hybrid(
     audio: &AudioData,
     cfg: &OnsetConfig,
@@ -89,8 +91,15 @@ pub fn analyze_offline_hybrid(
         } else {
             audio.duration_ms as f64 - onset.timestamp_ms
         };
-        let window_duration_ms = duration_ms.clamp(50.0, 500.0);
-        let features = extract_features_for_window(audio, onset.timestamp_ms, window_duration_ms);
+        // Scalar features over the SAME fixed window the factory model was
+        // fitted with (and the streaming path uses). The Gaussian's zcr/crest
+        // dims and the hum gate are calibrated to 150ms statistics; a variable
+        // gap-to-next-onset window (up to 500ms of decay/silence) skews both.
+        let features = extract_features_for_window(
+            audio,
+            onset.timestamp_ms,
+            events::hybrid::HYBRID_MFCC_WINDOW_MS,
+        );
 
         let start = ((onset.timestamp_ms / 1000.0) * audio.sample_rate as f64) as usize;
         let mfcc_len = ((events::hybrid::HYBRID_MFCC_WINDOW_MS / 1000.0)
@@ -289,5 +298,58 @@ mod tests {
         assert_eq!(class_id(EventClass::HihatNoise), 1.0);
         assert_eq!(class_id(EventClass::Click), 2.0);
         assert_eq!(class_id(EventClass::HumVoiced), 3.0);
+    }
+}
+
+#[cfg(test)]
+mod offline_hybrid_tests {
+    use super::*;
+
+    /// 150→60Hz sweep kick with sharp decay (same as streaming.rs tests).
+    fn synth_kick(sample_rate: u32, dur_sec: f32) -> Vec<f32> {
+        let n = (sample_rate as f32 * dur_sec) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                let freq = if t < 0.05 { 150.0 - 90.0 * t / 0.05 } else { 60.0 };
+                let phase = 2.0 * std::f32::consts::PI * freq * t;
+                phase.sin() * (-35.0 * t).exp() * 0.9
+            })
+            .collect()
+    }
+
+    /// The classifier's scalar features must come from the SAME fixed 150ms
+    /// window the factory model was fitted with (and streaming uses) — not
+    /// the variable gap-to-next-onset window. A lone kick followed by 850ms
+    /// of silence makes the two windows maximally different (150 vs 500ms).
+    #[test]
+    fn hybrid_offline_scalar_window_is_fixed_150ms() {
+        let sr = 44_100u32;
+        let mut samples = synth_kick(sr, 0.15);
+        samples.resize(sr as usize, 0.0); // 1s total: kick + long silence
+        let frame_count = samples.len();
+        let audio = AudioData {
+            samples,
+            sample_rate: sr,
+            channels: 1,
+            bit_depth: 16,
+            duration_ms: 1000,
+            frame_count,
+        };
+        let events =
+            analyze_offline_hybrid(&audio, &OnsetConfig::default(), &HybridClassifier::factory());
+        assert_eq!(events.len(), 1, "expected exactly one onset");
+        let expected = extract_features_for_window(
+            &audio,
+            events[0].timestamp_ms,
+            events::hybrid::HYBRID_MFCC_WINDOW_MS,
+        );
+        assert_eq!(
+            events[0].features.crest_factor, expected.crest_factor,
+            "crest must be computed over the fixed 150ms window"
+        );
+        assert_eq!(events[0].features.zcr, expected.zcr);
+        // duration_ms still reports the musical gap, not the feature window
+        assert!(events[0].duration_ms > 500.0);
     }
 }
