@@ -1,6 +1,8 @@
 # training/tests/test_prototypes.py
 import numpy as np
-from beatrice_ml.prototypes import factory_prototypes, adapt, five_shot_eval
+from beatrice_ml.prototypes import (
+    factory_prototypes, adapt, five_shot_eval, select_tau, fit_temperature,
+)
 
 def _bank():
     rng = np.random.default_rng(1729)
@@ -47,3 +49,33 @@ def test_draws_are_deterministic():
     a = five_shot_eval(emb, meta, 2, protos, 5.0, draws=5, seed=42)
     b = five_shot_eval(emb, meta, 2, protos, 5.0, draws=5, seed=42)
     assert a == b
+
+def test_select_tau_picks_best_mean():
+    # tau=5 has the highest mean macro accuracy (0.85) -> selected.
+    results = {0: [0.5, 0.6], 5: [0.9, 0.8], 20: [0.7, 0.7]}
+    assert select_tau(results) == 5
+    # Ties broken by the smallest tau for determinism.
+    assert select_tau({1: [0.8], 2: [0.8]}) == 1
+
+def test_fit_temperature_recovers_known_scale():
+    rng = np.random.default_rng(1729)
+    n, n_cls = 400, 3
+    labels = rng.integers(0, n_cls, size=n)
+    # Well-separated class logits: one-hot * 4.0 + small noise, scaled by T_true.
+    T_true = 2.5
+    base = np.eye(n_cls)[labels] * 4.0 + 0.05 * rng.standard_normal((n, n_cls))
+    logits = base / T_true
+
+    def nll(t):
+        z = logits / t
+        z = z - z.max(axis=1, keepdims=True)
+        logsumexp = np.log(np.sum(np.exp(z), axis=1))
+        logp = z[np.arange(n), labels] - logsumexp
+        return float(-np.mean(logp))
+
+    T = fit_temperature(logits, labels)
+    assert 0.05 <= T <= 20.0
+    # The returned T minimizes NLL vs the bracket endpoints and a midpoint.
+    assert nll(T) <= nll(0.05) + 1e-9
+    assert nll(T) <= nll(1.0) + 1e-9
+    assert nll(T) <= nll(20.0) + 1e-9
