@@ -6,7 +6,13 @@ import path from "path";
 // Only alias the Tauri API to the mock when running in browser-only mode.
 const isTauri = !!process.env.TAURI_ENV_PLATFORM;
 
+// GitHub Pages serves from a repo subpath (/beatrice/). Only apply that base
+// for the Pages deploy build (CI sets GITHUB_PAGES=true) — local dev, `vite
+// preview`, and the e2e suite all navigate to "/" and must keep base "/".
+const base = process.env.GITHUB_PAGES ? "/beatrice/" : "/";
+
 export default defineConfig({
+  base,
   plugins: [react()],
   clearScreen: false,
   // Phase 3 SPIKE: the AudioWorklet loads its WASM by fetching the .wasm as a

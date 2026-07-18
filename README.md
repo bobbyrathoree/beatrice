@@ -15,6 +15,16 @@ Beatrice is a desktop app that transforms beatbox performances into harmonically
   <img src="docs/logo.png" alt="Beatrice Logo" width="300">
 </p>
 
+<p align="center">
+  <a href="https://bobbyrathoree.github.io/beatrice/"><strong>▶ Try the live demo</strong></a>
+  &nbsp;·&nbsp; runs the full pipeline in your browser — click <strong>TRY DEMO</strong> and press play
+</p>
+
+> The hosted demo runs the frontend against a mock backend (a canned beatbox
+> performance), so the detect → classify → arrange → play → export flow works
+> end-to-end with audio, no install. The native app runs the real Rust DSP
+> backend — see [Getting Started](#getting-started).
+
 ## Contents
 
 - [How It Works](#how-it-works)
