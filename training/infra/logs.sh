@@ -6,7 +6,9 @@
 set -euo pipefail
 export AWS_PROFILE=default AWS_DEFAULT_REGION=us-west-2
 
-BUCKET="beatrice-ml-387391740137-usw2"
+# Bucket defaults to beatrice-ml-<account-id>-usw2, derived from the caller's
+# AWS account at runtime; override with BEATRICE_S3_BUCKET.
+BUCKET="${BEATRICE_S3_BUCKET:-beatrice-ml-$(aws sts get-caller-identity --query Account --output text)-usw2}"
 
 RUN_ID="${1:-}"
 [ -n "$RUN_ID" ] || { echo "usage: $0 <run-id>" >&2; exit 2; }

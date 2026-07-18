@@ -40,7 +40,7 @@ shellcheck-clean.
 
 ## S3 layout
 
-Bucket: `beatrice-ml-387391740137-usw2`
+Bucket: `beatrice-ml-<aws-account-id>-usw2` (derived at runtime; override with `BEATRICE_S3_BUCKET`)
 
 ```
 s3://$BUCKET/

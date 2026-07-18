@@ -2,11 +2,32 @@
 
 > Beatbox into your mic. Get a synth beat out.
 
+[![CI](https://github.com/bobbyrathoree/beatrice/actions/workflows/ci.yml/badge.svg)](https://github.com/bobbyrathoree/beatrice/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Rust](https://img.shields.io/badge/Rust-1.77+-orange?logo=rust&logoColor=white)
+![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+
 Beatrice is a desktop app that transforms beatbox performances into harmonically intelligent synthesizer arrangements. You provide the rhythm with your mouth — kicks, hi-hats, snares, and hums — and Beatrice detects each sound, classifies it, estimates your tempo, and arranges everything into a multi-track composition that follows real chord progressions.
 
 <p align="center">
   <img src="docs/logo.png" alt="Beatrice Logo" width="300">
 </p>
+
+## Contents
+
+- [How It Works](#how-it-works)
+- [Screenshots](#screenshots)
+- [Sound Classification](#sound-classification)
+- [Benchmark](#benchmark)
+- [Themes](#themes)
+- [Song Mode](#song-mode)
+- [Jam Mode](#jam-mode)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+- [Architecture](#architecture)
+- [License](#license)
 
 ## How It Works
 
