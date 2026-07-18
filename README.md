@@ -219,14 +219,22 @@ CNN-embedding classifier (AVP-LVT, 0.90 bar).
 
 ## Themes
 
-Themes define the harmonic personality of the output:
+Themes define the **harmonic** personality of the output — the key, the chord
+progression, the bass motion, and the suggested tempo:
 
-| Theme | Key | Progression | Character |
-|-------|-----|------------|-----------|
-| **Blade Runner** | D minor | Dm → Bb → F → C | Dark, atmospheric, Vangelis-inspired |
-| **Stranger Things** | C minor | Cm → Bb → Ab → Bb | Retro 80s synth |
+| Theme | Key | Progression | Bass | Tempo |
+|-------|-----|------------|------|-------|
+| **Blade Runner** | D minor | Dm → Bb → F → C | Root–fifth | 80–100 BPM |
+| **Stranger Things** | C minor | Cm → Bb → Ab → Bb | Driving offbeat eighths | 100–120 BPM |
 
-The bass line follows the chord progression with root-fifth alternation. Pad chords resolve to the active triad. Arpeggios can be driven by your hi-hat rhythm (ArpDrive mode).
+The bass line follows the chord progression, pad chords resolve to the active
+triad, and arpeggios can be driven by your hi-hat rhythm (ArpDrive template).
+
+> **What a theme does and doesn't change:** switching theme changes the notes —
+> key, chords, bass pattern, tempo. It does **not** currently change the timbre:
+> both themes use the same synth voices and the same master reverb/delay bus (see
+> `src/audio/scheduleArrangement.ts`). Per-theme sound design (distinct pads, FX)
+> is modeled in the theme data but not yet wired into the synth.
 
 ## Song Mode
 

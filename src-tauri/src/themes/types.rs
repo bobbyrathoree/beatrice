@@ -85,6 +85,12 @@ pub struct Theme {
     pub bass_pattern: BassPattern,
     pub arp_pattern: ArpPattern,
     pub arp_octave_range: (i8, i8),      // e.g., (-1, 1) for 3 octaves
+    // NOTE: the four fields below are declared but NOT yet consumed by the
+    // WebAudio synth (scheduleArrangement.ts uses one fixed FX bus and one pad
+    // voice for every theme). They describe intended sound design that isn't
+    // wired up, so switching theme changes harmony/tempo — not timbre. Keep
+    // them so the data model is ready if/when per-theme synthesis lands; don't
+    // advertise theme-specific FX to users until it does.
     pub drum_palette: DrumPalette,
     pub fx_profile: FxProfile,
     pub synth_stab_velocity: u8,         // Velocity for B-triggered synth

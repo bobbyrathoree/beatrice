@@ -17,11 +17,15 @@ pub fn get_theme(name: &str) -> Option<types::Theme> {
 /// List all available themes with summaries
 pub fn list_themes() -> Vec<types::ThemeSummary> {
     vec![
+        // Descriptions state what the arranger actually does: set the key and
+        // chord progression the bass, pads, and arps follow. Timbre/FX are the
+        // same synth voices across themes (see scheduleArrangement.ts), so we
+        // don't claim theme-specific sound design here.
         blade_runner::blade_runner_theme().summary(
-            "Vangelis-inspired pads, brass stabs, gated reverb. Melancholic and atmospheric."
+            "D minor, i–VI–III–VII (Dm–Bb–F–C). Root-fifth bass, slower tempo. Darker, more spacious harmony."
         ),
         stranger_things::stranger_things_theme().summary(
-            "Synthwave horror with arpeggios, pulsing bass, and dark delay. Retro and unsettling."
+            "C minor, i–VII–VI–VII (Cm–Bb–Ab–Bb). Driving offbeat bass, faster tempo. Tenser, more restless harmony."
         ),
     ]
 }

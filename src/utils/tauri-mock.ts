@@ -94,6 +94,32 @@ function generateMockEvents(audioBytes: number[]): any[] {
   return events;
 }
 
+// Theme -> chord voicings, mirroring themes/types.rs (scale_notes + chord_notes)
+// and themes/{blade_runner,stranger_things}.rs. Natural-minor scale, triads by
+// scale degree, voiced one octave down to match the pad register the mock has
+// always used. Keeps the browser demo's harmony in sync with the native path.
+const NATURAL_MINOR = [0, 2, 3, 5, 7, 8, 10];
+const CHORD_DEGREE: Record<string, number> = {
+  I: 0, Im: 0, II: 1, IIm: 1, III: 2, IIIm: 2, IV: 3, IVm: 3,
+  V: 4, Vm: 4, VI: 5, VIm: 5, VII: 6, VIIm: 6,
+};
+const THEME_HARMONY: Record<string, { root: number; progression: string[] }> = {
+  'BLADE RUNNER': { root: 62, progression: ['Im', 'VI', 'III', 'VII'] },   // D minor
+  'STRANGER THINGS': { root: 60, progression: ['Im', 'VII', 'VI', 'VII'] }, // C minor
+};
+
+function themeChords(themeName?: string): { root: number; third: number; fifth: number }[] {
+  const theme = THEME_HARMONY[(themeName || 'BLADE RUNNER').toUpperCase()] ?? THEME_HARMONY['BLADE RUNNER'];
+  const scale = NATURAL_MINOR.map((i) => theme.root + i);
+  return theme.progression.map((chord) => {
+    const degree = CHORD_DEGREE[chord] ?? 0;
+    const chordRoot = scale[degree] ?? theme.root;
+    const thirdOffset = chord.endsWith('m') ? 3 : 4; // minor vs major triad
+    // Voice one octave below the theme root (the -12 the pad register uses).
+    return { root: chordRoot - 12, third: chordRoot + thirdOffset - 12, fifth: chordRoot + 7 - 12 };
+  });
+}
+
 // Build the mock Arrangement from quantized events (mirrors Rust arranger + expand_to_song)
 function buildMockArrangement(args: Record<string, any>): unknown {
   const quantizedEvents = args?.input?.events || [];
@@ -122,13 +148,13 @@ function buildMockArrangement(args: Record<string, any>): unknown {
   const msPerBeat = 60000 / bpm;
   const msPerBar = msPerBeat * 4;
 
-  // Mock harmonic progression: Dm -> Bb -> F -> C
-  const chords = [
-    { root: 50, third: 53, fifth: 57 }, // Dm (D3, F3, A3)
-    { root: 58, third: 62, fifth: 65 }, // Bb (Bb3, D4, F4)
-    { root: 53, third: 57, fifth: 60 }, // F (F3, A3, C4)
-    { root: 60, third: 64, fifth: 67 }, // C (C4, E4, G4)
-  ];
+  // Harmonic progression derived from the selected theme, mirroring the Rust
+  // arranger (themes/types.rs scale_notes + chord_notes) so switching theme in
+  // the browser demo actually changes the notes — not just the label. Chords
+  // are voiced one octave below the theme root (the -12 the pad register has
+  // always used), so BLADE RUNNER stays byte-identical to the previous
+  // hardcoded Dm–Bb–F–C.
+  const chords = themeChords(args?.input?.theme_name);
 
   let arpCounter = 0;
 
@@ -415,8 +441,8 @@ const HANDLERS: Record<string, Handler> = {
   // --- Themes (match Rust ThemeSummary / Theme structs) ---
   // Values mirror src-tauri/src/themes/{blade_runner,stranger_things}.rs exactly.
   list_themes: () => [
-    { name: 'BLADE RUNNER', description: 'Vangelis-inspired pads, brass stabs, gated reverb. Melancholic and atmospheric.', bpm_range: [80, 100], root_note: 62, scale_family: 'NaturalMinor' },
-    { name: 'STRANGER THINGS', description: 'Synthwave horror with arpeggios, pulsing bass, and dark delay. Retro and unsettling.', bpm_range: [100, 120], root_note: 60, scale_family: 'NaturalMinor' },
+    { name: 'BLADE RUNNER', description: 'D minor, i–VI–III–VII (Dm–Bb–F–C). Root-fifth bass, slower tempo. Darker, more spacious harmony.', bpm_range: [80, 100], root_note: 62, scale_family: 'NaturalMinor' },
+    { name: 'STRANGER THINGS', description: 'C minor, i–VII–VI–VII (Cm–Bb–Ab–Bb). Driving offbeat bass, faster tempo. Tenser, more restless harmony.', bpm_range: [100, 120], root_note: 60, scale_family: 'NaturalMinor' },
   ],
 
   get_theme: (a) => {
