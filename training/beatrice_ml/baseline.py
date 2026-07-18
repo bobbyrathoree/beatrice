@@ -61,8 +61,10 @@ import copy
 import json
 import logging
 import time
+import traceback
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 from .ablate import _dev_participants, _git_sha, _load_manifest
@@ -125,13 +127,24 @@ def _restrict_splits(splits: dict, restrict: set) -> dict:
     return out
 
 
-def _dump(path: Path, obj) -> None:
-    """Write JSON with a str fallback for any stray non-serializable values.
+def _json_default(o):
+    """Numpy-safe JSON fallback for any stray non-serializable values.
 
     ``nested_oof_run`` / ``matched_gaussian_baseline`` already return plain
-    Python floats, but ``default=str`` is a cheap guard against any numpy scalar
-    slipping through so a durable dump never fails mid-run."""
-    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False, default=str))
+    Python floats, but a numpy scalar or array can slip through; coerce those to
+    native types (rather than stringifying them) so a durable dump stays
+    machine-readable and never fails mid-run."""
+    if isinstance(o, np.generic):
+        return o.item()
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return str(o)
+
+
+def _dump(path: Path, obj) -> None:
+    """Write JSON with a numpy-safe fallback for stray non-serializable values."""
+    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False,
+                               default=_json_default))
 
 
 def _variant_summary(variant_name: str, gate: dict | None,
@@ -278,13 +291,12 @@ def main(argv=None) -> None:
         # Tiny eval draws for the plumbing check (threaded through config for both
         # nested_oof_run and matched_gaussian_baseline, which read eval_draws).
         config.setdefault("prototypes", {})["eval_draws"] = 5
-        if args.epochs is not None:
-            config["train"] = {**config.get("train", {}), "max_epochs": args.epochs}
     else:
         restrict = _dev_participants(splits)
         copies = int(config.get("augment", {}).get("copies_per_event", 10))
-        if args.epochs is not None:
-            config["train"] = {**config.get("train", {}), "max_epochs": args.epochs}
+
+    if args.epochs is not None:
+        config["train"] = {**config.get("train", {}), "max_epochs": args.epochs}
 
     # Guard the whole restriction set up front — no locked-TEST participant is
     # ever cached, trained, or evaluated.
@@ -294,19 +306,35 @@ def main(argv=None) -> None:
     if not out_dir.is_absolute():
         out_dir = _ROOT / args.out
     out_dir.mkdir(parents=True, exist_ok=True)
-    cache_dir = out_dir / "caches"
+    # Caches (~1GB of regenerable npz) go to a SIBLING scratch dir, NOT under
+    # runs/<run-id>/ — the EC2 bootstrap syncs the runs/<run-id>/ prefix to S3
+    # every 10 min and these are pure scratch that must not be uploaded.
+    cache_dir = out_dir.parent / (out_dir.name + "-caches")
     cache_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("caches -> %s (scratch, NOT synced to S3)", cache_dir)
 
     t0 = time.time()
     logger.info("baseline driver: mode=%s seeds=%s variants=%s out=%s",
                 "dry_run" if args.dry_run else "full", seeds,
                 [v["name"] for v in _CROP_VARIANTS], out_dir)
 
+    # Per-variant fault isolation: a hard failure in one variant (e.g. crop_A)
+    # must not kill the others (crop_C). Record the error + traceback, note it in
+    # the summary, and press on — but exit nonzero at the end so exit_code.txt
+    # reflects the failure.
     summaries = {}
+    errored = False
     for variant in _CROP_VARIANTS:
-        summaries[variant["name"]] = run_variant(
-            variant, config, splits, manifest_rows, roots, restrict, seeds,
-            out_dir, cache_dir, copies=copies)
+        name = variant["name"]
+        try:
+            summaries[name] = run_variant(
+                variant, config, splits, manifest_rows, roots, restrict, seeds,
+                out_dir, cache_dir, copies=copies)
+        except Exception as exc:  # noqa: BLE001 — isolate variants, record & continue
+            errored = True
+            logger.error("[%s] variant FAILED: %s\n%s", name, exc,
+                         traceback.format_exc())
+            summaries[name] = {"variant": name, "error": str(exc)}
 
     wall_s = round(time.time() - t0, 1)
     final = {
@@ -320,7 +348,13 @@ def main(argv=None) -> None:
     }
     _dump(out_dir / "baseline_summary.json", final)
     logger.info("baseline driver done in %.1fs -> %s", wall_s, out_dir)
-    print(json.dumps(final, default=str))
+    print(json.dumps(final, default=_json_default))
+
+    # Only after attempting all variants and writing the summary: fail loudly so
+    # exit_code.txt reflects that at least one variant errored.
+    if errored:
+        failed = [n for n, s in summaries.items() if "error" in s]
+        raise SystemExit(f"baseline: {len(failed)} variant(s) errored: {failed}")
 
 
 if __name__ == "__main__":
