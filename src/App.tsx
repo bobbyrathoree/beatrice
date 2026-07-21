@@ -198,12 +198,20 @@ function App() {
     }
   };
 
-  // Run the full pipeline
-  const runPipeline = async (_project: Project) => {
+  // Run the full pipeline.
+  //
+  // `themeOverride` lets a caller pin the theme to arrange with instead of the
+  // `selectedTheme` state — needed by the replay path, which sets the run's
+  // theme via setSelectedTheme() moments earlier but hasn't re-rendered yet, so
+  // the fresh state isn't readable here. `undefined` means "use current state";
+  // an explicit `null` means "no theme" (falls back to BLADE RUNNER like state).
+  const runPipeline = async (_project: Project, themeOverride?: Theme | null) => {
     if (isPipelineRunning) {
       console.warn("Pipeline already running, ignoring duplicate request");
       return;
     }
+
+    const effectiveTheme = themeOverride !== undefined ? themeOverride : selectedTheme;
 
     setIsPipelineRunning(true);
     setProcessingProgress(0);
@@ -289,8 +297,8 @@ function App() {
       const arrangement = await commands
         .arrangeEventsCommand({
           events: quantizedResult,
-          template: mapThemeToTemplate(selectedTheme),
-          theme_name: selectedTheme?.name || "BLADE RUNNER",
+          template: mapThemeToTemplate(effectiveTheme),
+          theme_name: effectiveTheme?.name || "BLADE RUNNER",
           bpm: tempoResult.bpm,
           time_signature: gridSettings.time_signature,
           division: gridSettings.division,
@@ -697,7 +705,10 @@ function App() {
       setAudioData(audioBytes);
       setIsAudioLoading(false);
 
-      await runPipeline(fullProject);
+      // Pass the run's own theme explicitly: setSelectedTheme(runTheme) above
+      // hasn't re-rendered yet, so runPipeline would otherwise read the stale
+      // previously-selected theme from state and contradict the run's theme.
+      await runPipeline(fullProject, runTheme);
     } catch (err) {
       handleError(`Failed to load run: ${formatIpcError(err)}`);
     }

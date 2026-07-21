@@ -6,11 +6,18 @@
 // the same pure module the offline WAV renderer uses — so what users hear and
 // what they export come from one code path.
 //
-// DURATION includes the themed FX tail (timbre.fx.renderTailSec — up to ~3s for
-// DarkDelay): total_duration_ms covers only scheduled notes, but the delay/reverb
-// keeps ringing after the last note. Adding the tail keeps three things equal —
-// what the progress bar shows, what you actually hear, and the exported WAV
-// length (renderWav.ts uses the identical total + renderTailSec).
+// DURATION (the exposed state) is the MUSICAL duration only — the span of
+// scheduled notes (calculateArrangementDuration). The UI keys off this: the
+// progress bar reaches 100% at the musical end, and the Song Mode section HUD
+// derives Intro/Build/Drop/Outro from duration/4, so a variable FX tail must NOT
+// leak into it.
+//
+// The themed FX tail (timbre.fx.renderTailSec — up to ~3s for DarkDelay) is kept
+// AUDIBLE but out of the exposed duration: the delay/reverb keeps ringing after
+// the last note, so we hold teardown (AudioContext close + STOP button) until
+// `musical duration + tail` has elapsed, while clamping the displayed time to the
+// musical end. The exported WAV (renderWav.ts) still renders the identical
+// total + renderTailSec — so what you hear in-app and what you export match.
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
@@ -29,14 +36,18 @@ export function useAudioPlayback(initialArrangement?: any) {
   const rafRef = useRef<number | null>(null);
   const playStartRef = useRef<number>(0);
   const durationRef = useRef<number>(0);
+  // Audible FX tail beyond the musical end — kept out of the exposed `duration`
+  // so the section HUD math stays correct, but honored before teardown.
+  const tailRef = useRef<number>(0);
 
   // Update duration when the arrangement changes. bpm is read off the
-  // arrangement metadata (self-contained), not passed in.
+  // arrangement metadata (self-contained), not passed in. This is the MUSICAL
+  // duration (scheduled notes only) — the UI/HUD keys off it, so the FX tail
+  // stays out.
   useEffect(() => {
     if (initialArrangement) {
-      const { sound, bpm } = renderMetaFromArrangement(initialArrangement);
-      const timbre = deriveTimbre(sound, bpm);
-      const dur = calculateArrangementDuration(initialArrangement, bpm) + timbre.fx.renderTailSec;
+      const { bpm } = renderMetaFromArrangement(initialArrangement);
+      const dur = calculateArrangementDuration(initialArrangement, bpm);
       setDuration(dur);
       durationRef.current = dur;
     }
@@ -60,13 +71,23 @@ export function useAudioPlayback(initialArrangement?: any) {
     if (!ctxRef.current || !isPlaying) return;
 
     const elapsed = ctxRef.current.currentTime - playStartRef.current;
-    if (elapsed >= durationRef.current) {
+    // End playback only after the audible FX tail has rung out, but never let the
+    // displayed time run past the musical end (keeps the progress bar pinned at
+    // 100% and the section HUD out of a phantom OUTRO while the tail rings).
+    if (elapsed >= durationRef.current + tailRef.current) {
       setCurrentTime(durationRef.current);
       setIsPlaying(false);
+      // Natural completion still owns an open AudioContext (an OS audio
+      // resource) — close it here exactly like stop() does, or it leaks until
+      // the next play/stop/unmount.
+      if (ctxRef.current) {
+        ctxRef.current.close().catch(() => {});
+        ctxRef.current = null;
+      }
       return;
     }
 
-    setCurrentTime(elapsed);
+    setCurrentTime(Math.min(elapsed, durationRef.current));
     rafRef.current = requestAnimationFrame(tick);
   }, [isPlaying]);
 
@@ -97,6 +118,7 @@ export function useAudioPlayback(initialArrangement?: any) {
       ctxRef.current.close().catch(() => {});
       ctxRef.current = null;
     }
+    tailRef.current = 0;
     setIsPlaying(false);
     setCurrentTime(0);
   }, []);
@@ -117,11 +139,14 @@ export function useAudioPlayback(initialArrangement?: any) {
     const { sound, bpm } = renderMetaFromArrangement(arrangement);
     const timbre = deriveTimbre(sound, bpm);
 
-    // Include the FX tail so STOP stays visible (and the progress bar keeps
-    // running) while the delay/reverb rings out — matches the exported WAV length.
-    const songDurationSec = calculateArrangementDuration(arrangement, bpm) + timbre.fx.renderTailSec;
+    // Exposed duration is MUSICAL only (scheduled notes) — the progress bar and
+    // section HUD key off it. The FX tail is tracked separately so STOP stays
+    // visible (and the context stays open) while the delay/reverb rings out,
+    // without shifting the HUD's section boundaries.
+    const songDurationSec = calculateArrangementDuration(arrangement, bpm);
 
     durationRef.current = songDurationSec;
+    tailRef.current = timbre.fx.renderTailSec;
     setDuration(songDurationSec);
 
     // Create a fresh AudioContext
