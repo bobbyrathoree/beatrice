@@ -5,6 +5,12 @@
 // actual synthesis and note scheduling lives in `../audio/scheduleArrangement`,
 // the same pure module the offline WAV renderer uses — so what users hear and
 // what they export come from one code path.
+//
+// DURATION includes the themed FX tail (timbre.fx.renderTailSec — up to ~3s for
+// DarkDelay): total_duration_ms covers only scheduled notes, but the delay/reverb
+// keeps ringing after the last note. Adding the tail keeps three things equal —
+// what the progress bar shows, what you actually hear, and the exported WAV
+// length (renderWav.ts uses the identical total + renderTailSec).
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
@@ -28,8 +34,9 @@ export function useAudioPlayback(initialArrangement?: any) {
   // arrangement metadata (self-contained), not passed in.
   useEffect(() => {
     if (initialArrangement) {
-      const { bpm } = renderMetaFromArrangement(initialArrangement);
-      const dur = calculateArrangementDuration(initialArrangement, bpm);
+      const { sound, bpm } = renderMetaFromArrangement(initialArrangement);
+      const timbre = deriveTimbre(sound, bpm);
+      const dur = calculateArrangementDuration(initialArrangement, bpm) + timbre.fx.renderTailSec;
       setDuration(dur);
       durationRef.current = dur;
     }
@@ -110,7 +117,9 @@ export function useAudioPlayback(initialArrangement?: any) {
     const { sound, bpm } = renderMetaFromArrangement(arrangement);
     const timbre = deriveTimbre(sound, bpm);
 
-    const songDurationSec = calculateArrangementDuration(arrangement, bpm);
+    // Include the FX tail so STOP stays visible (and the progress bar keeps
+    // running) while the delay/reverb rings out — matches the exported WAV length.
+    const songDurationSec = calculateArrangementDuration(arrangement, bpm) + timbre.fx.renderTailSec;
 
     durationRef.current = songDurationSec;
     setDuration(songDurationSec);

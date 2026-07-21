@@ -611,7 +611,13 @@ export function schedulePad(
   padBus.gain.setValueAtTime(0.001, time);
   padBus.gain.linearRampToValueAtTime(Math.max(0.001, peak), time + p.attackSec); // attack
   padBus.gain.exponentialRampToValueAtTime(decayTarget, time + durSec * p.decayByPortion); // decay (flat when sustained)
-  padBus.gain.exponentialRampToValueAtTime(0.001, time + durSec); // release
+  // HOLD: sustain the post-decay level from decayByPortion → 80% of the note so
+  // rhythmic pads (decayToLevel 0.2, decayByPortion 0.4) don't start releasing the
+  // instant decay ends — the contract is decay → HOLD → release over the last 20%.
+  // For sustained pads (decayToLevel 1.0, decayByPortion 0.8) this pins the peak at
+  // the same 0.8 point the decay ramp already reaches: a redundant, harmless no-op.
+  padBus.gain.setValueAtTime(decayTarget, time + durSec * 0.8);
+  padBus.gain.exponentialRampToValueAtTime(0.001, time + durSec); // release (last 20%)
 
   // Velocity to filter cutoff
   const velFactor = Math.pow(velocity / 127, 2);

@@ -97,6 +97,7 @@ function fixture(sound: ThemeSound, theme_name: string) {
 let brA!: Uint8Array;
 let brB!: Uint8Array;
 let st!: Uint8Array;
+let darkDelay!: Uint8Array;
 let chorus!: Uint8Array;
 let dry!: Uint8Array;
 
@@ -105,6 +106,10 @@ beforeAll(async () => {
   brA = await renderArrangementToWav(fixture(BR_SOUND, "BLADE RUNNER"), SR);
   brB = await renderArrangementToWav(fixture(BR_SOUND, "BLADE RUNNER"), SR);
   st = await renderArrangementToWav(fixture(ST_SOUND, "STRANGER THINGS"), SR);
+  // Isolates the FX profile: identical to brA in EVERY way except fx_profile
+  // (BR's kit + sustained pads), so a tail difference vs brA is attributable to
+  // DarkDelay alone — not to the TR808 kit or rhythmic pads that also differ in ST.
+  darkDelay = await renderArrangementToWav(fixture({ ...BR_SOUND, fx_profile: "DarkDelay" }, "DARK DELAY"), SR);
   chorus = await renderArrangementToWav(fixture({ ...BR_SOUND, fx_profile: "WideChorus" }, "WIDE CHORUS"), SR);
   dry = await renderArrangementToWav(fixture({ ...BR_SOUND, fx_profile: "Dry" }, "DRY"), SR);
 
@@ -160,9 +165,10 @@ describe("theme sounds differ measurably (A/B)", () => {
     console.log(`[band] BR proportions = [${pA.map((v) => v.toFixed(4)).join(", ")}]`);
     console.log(`[band] ST proportions = [${pB.map((v) => v.toFixed(4)).join(", ")}]`);
     console.log(`[band] l1Sum(BR, ST) = ${delta.toFixed(4)} (initial floor T_band=0.08)`);
-    // MEASURED l1Sum(BR, ST) = 0.3176 (deterministic — seeded render, stable
-    // across runs). Threshold policy: final floor ≈ half the measured margin,
-    // and comfortably above the 0.08 initial floor. 0.3176/2 ≈ 0.16.
+    // MEASURED l1Sum(BR, ST) = 0.3651 (deterministic — seeded render, stable
+    // across runs; re-measured after the pad hold-stage fix). Threshold policy:
+    // final floor ≈ half the measured margin, comfortably above the 0.08 initial
+    // floor. 0.3651/2 ≈ 0.18; the 0.16 floor stays (well below the margin).
     const T_band = 0.16;
     expect(delta).toBeGreaterThan(T_band);
   });
@@ -174,27 +180,31 @@ describe("theme sounds differ measurably (A/B)", () => {
     const envB = rmsEnvelope(b, SR, 0.025);
     const delta = meanAbsDiff(envA, envB); // meanAbsDiff already spans the min length
     console.log(`[env] meanAbsDiff(BR, ST) = ${delta.toFixed(4)} (initial floor T_env=0.02)`);
-    // MEASURED meanAbsDiff(BR, ST) = 0.5228 (deterministic). Threshold policy:
-    // final floor ≈ half the measured margin (0.5228/2 ≈ 0.26), far above the
-    // 0.02 initial floor.
+    // MEASURED meanAbsDiff(BR, ST) = 0.5513 (deterministic; re-measured after the
+    // pad hold-stage fix). Threshold policy: final floor ≈ half the measured margin
+    // (0.5513/2 ≈ 0.28), far above the 0.02 initial floor; the 0.26 floor stays.
     const T_env = 0.26;
     expect(delta).toBeGreaterThan(T_env);
   });
 
   it("dark_delay_tail_outlasts_gated_reverb", () => {
+    // FX-isolated A/B: both renders use BR's kit + sustained pads; ONLY the
+    // fx_profile differs (GatedReverb vs DarkDelay), so the tail-energy gap is
+    // attributable to the delay profile alone, as the test name claims.
     const a = wavToMono(brA); // GatedReverb — gated at 0.28s
-    const b = wavToMono(st); // DarkDelay — long feedback tail
+    const b = wavToMono(darkDelay); // DarkDelay — long feedback tail (else identical to brA)
     const len = Math.max(a.length, b.length);
     const brMono = padTo(a, len);
-    const stMono = padTo(b, len);
+    const ddMono = padTo(b, len);
     const eBR = energyInWindow(brMono, SR, 4.05, 4.9);
-    const eST = energyInWindow(stMono, SR, 4.05, 4.9);
-    const ratio = eBR > 0 ? eST / eBR : Infinity;
-    console.log(`[tail] energy[4.05,4.9] BR(GatedReverb)=${eBR.toFixed(3)} ST(DarkDelay)=${eST.toFixed(3)} ratio=${ratio.toFixed(2)}x`);
-    // MEASURED ST/BR tail-energy ratio = 16.57x (deterministic) — DarkDelay's
-    // long feedback tail vastly outlasts GatedReverb's 0.28s gate. The brief
-    // specifies the fixed 1.2x multiplier; the huge measured margin confirms it.
-    expect(eST).toBeGreaterThan(1.2 * eBR);
+    const eDD = energyInWindow(ddMono, SR, 4.05, 4.9);
+    const ratio = eBR > 0 ? eDD / eBR : Infinity;
+    console.log(`[tail] energy[4.05,4.9] GatedReverb=${eBR.toFixed(3)} DarkDelay=${eDD.toFixed(3)} ratio=${ratio.toFixed(2)}x`);
+    // MEASURED DarkDelay/GatedReverb tail-energy ratio = 57.84x (deterministic,
+    // FX-isolated — only fx_profile differs). DarkDelay's long feedback tail vastly
+    // outlasts GatedReverb's 0.28s gate. The brief specifies the fixed 1.2x floor;
+    // the measured margin sits far above it, so the floor stays.
+    expect(eDD).toBeGreaterThan(1.2 * eBR);
   });
 
   it("chorus_is_wide_and_dry_is_not", () => {

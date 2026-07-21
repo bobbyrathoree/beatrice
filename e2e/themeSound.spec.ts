@@ -84,9 +84,11 @@ test("theme switch changes the exported audio (notes, template, and timbre toget
   // fraction of samples, clustered in the reverb-tail windows. Root cause: BLADE RUNNER's
   // GatedReverb uses a ConvolverNode, and Chromium renders convolution via
   // partitioned FFT on background threads that are not bit-reproducible across
-  // OfflineAudioContext renders. The synthesis code itself IS byte-deterministic:
-  // the offline `render_is_deterministic` vitest renders this exact GatedReverb
-  // profile twice under node-web-audio-api and asserts full byte-equality (green).
+  // OfflineAudioContext renders. The synthesis code itself is deterministic to
+  // within the same convolver floor: the offline `render_is_deterministic` vitest
+  // renders this exact GatedReverb profile twice under node-web-audio-api and
+  // asserts sample-identity within ±1 LSB (relaxed from strict byte equality in
+  // 0e66448 for the same ConvolverNode jitter caveat).
   //
   // So this control asserts the tightest bound the platform permits without
   // masking a real bug: identical length + every sample within ±1 LSB. A genuine

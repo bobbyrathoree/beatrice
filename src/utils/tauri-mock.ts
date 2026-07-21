@@ -305,10 +305,15 @@ function buildMockArrangement(args: Record<string, any>): unknown {
       source_event_id: event.id || null,
     };
 
-    // Determine active chord (2 bars per chord), anchored to the grid phase so
-    // chord boundaries respect the performer's downbeat (mirrors get_chord_at_time).
+    // Determine active chord, anchored to the grid phase so chord boundaries respect
+    // the performer's downbeat (mirrors get_chord_at_time). Derived from the theme's
+    // own progression (bars_per_chord × chord count) rather than a hardcoded 4×2, so a
+    // theme #3 with a different-length progression works with no mock edits. No audible
+    // change for the two shipped themes — both are 4 chords × 2 bars.
     const bar = Math.floor(Math.max(0, timestamp - phaseOffsetMs) / msPerBar);
-    const chordIndex = Math.floor((bar % 8) / 2);
+    const barsPerChord = theme.chord_progression.bars_per_chord;
+    const cycleBars = barsPerChord * chords.length;
+    const chordIndex = Math.floor((bar % cycleBars) / barsPerChord);
     const currentChord = chords[chordIndex];
 
     if (cls.includes('bilabial')) {
@@ -318,9 +323,14 @@ function buildMockArrangement(args: Record<string, any>): unknown {
       // Gate + velocity mirror the Rust arranger exactly:
       //   fire only when b_emphasis > 0.3; velocity =
       //   round(source/127 * clamp(b_emphasis,0,1) * bass_stab_max_velocity).
+      // Voicing chain: `themeChords()` already voices every chord −12 below the
+      // natural root, so `currentChord.root` is the pre-voiced register. The bass
+      // pattern note is therefore taken AT that register (no extra −12), matching
+      // Rust which computes the pattern at the NATURAL register then subtracts 12
+      // (drum_lanes.rs ~line 412). For BLADE RUNNER: D1→D2 (MIDI 38→50).
       if (bEmphasis > 0.3) {
         const beatInBar = Math.floor((timestamp % msPerBar) / msPerBeat);
-        const bassMidi = BASS_PATTERN_NOTES[theme.bass_pattern](currentChord, beatInBar) - 12;
+        const bassMidi = BASS_PATTERN_NOTES[theme.bass_pattern](currentChord, beatInBar);
         const bassVelocity = Math.min(
           127,
           Math.max(1, Math.round((note.velocity / 127) * Math.min(1, Math.max(0, bEmphasis)) * theme.bass_stab_max_velocity)),

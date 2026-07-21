@@ -42,7 +42,11 @@ type AppState = "input" | "recording" | "jam" | "processing" | "results";
 // Map a selected theme to an arrangement template name. Prefers the theme's own
 // typed `default_template` (Rust source of truth), falling back to the name map
 // only when no Theme object is available.
+// INVARIANT: when no theme is selected yet, the template fallback MUST match the
+// theme_name fallback used at arrange time ("BLADE RUNNER", App.tsx:289) — else the
+// first pipeline run would arrange BLADE RUNNER with the wrong (straight) template.
 function mapThemeToTemplate(theme: Theme | null): string {
+  if (!theme) return mapThemeNameToTemplate("BLADE RUNNER");
   return templateForTheme(theme);
 }
 
@@ -553,16 +557,29 @@ function App() {
       // Sync the theme selector to the run's saved theme. The results-screen
       // re-arrange path keys off `selectedTheme`, so without this a later
       // groove tweak would silently re-arrange with the previously-selected
-      // theme. Best-effort: an unknown/removed theme just leaves the current
-      // selection (replay still uses run.theme directly for its arrangement).
+      // theme. On an unknown/removed theme we DON'T leave the stale selection:
+      // the arranger falls the run back to the canonical BLADE RUNNER, so the
+      // selector MUST track that same canonical fallback — otherwise a later
+      // re-arrange silently switches the theme out from under the arrangement.
       // The fetched theme (if any) also drives the replay template below.
       let runTheme: Theme | null = null;
       try {
         runTheme = unwrap(await commands.getTheme(run.theme));
         if (runTheme) {
           setSelectedTheme(runTheme);
+        } else {
+          // Miss: align the selector with the arranger's canonical fallback.
+          runTheme = unwrap(await commands.getTheme("BLADE RUNNER"));
+          if (runTheme) setSelectedTheme(runTheme);
+          console.warn(`Unknown theme "${run.theme}" for replay — using BLADE RUNNER fallback`);
         }
       } catch {
+        // Best-effort: even on a fetch error, try to anchor to the canonical
+        // fallback so a later re-arrange can't contradict the arrangement.
+        try {
+          runTheme = unwrap(await commands.getTheme("BLADE RUNNER"));
+          if (runTheme) setSelectedTheme(runTheme);
+        } catch { /* leave selection as-is if even the fallback fetch fails */ }
         console.warn(`Could not load theme "${run.theme}" for replay`);
       }
 
