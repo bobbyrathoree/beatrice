@@ -319,6 +319,20 @@ mod tests {
     use crate::groove::grid::{Grid, TimeSignature, GridDivision};
     use crate::arranger::templates::ArrangementTemplate;
 
+    /// Build an empty arrangement with BLADE RUNNER metadata for export tests.
+    /// The theme snapshot is irrelevant to MIDI bytes; this keeps `Arrangement::new`
+    /// call sites terse now that it carries theme metadata.
+    fn empty_arrangement(template: ArrangementTemplate, grid: &Grid) -> Arrangement {
+        Arrangement::new(
+            template,
+            grid.total_duration_ms(),
+            grid.bar_count,
+            "BLADE RUNNER".to_string(),
+            grid.bpm,
+            crate::themes::get_theme("BLADE RUNNER").unwrap().sound,
+        )
+    }
+
     #[test]
     fn test_calculate_ticks_per_ms() {
         let ticks_per_ms = calculate_ticks_per_ms(120.0, 480);
@@ -331,11 +345,7 @@ mod tests {
     #[test]
     fn test_export_empty_arrangement() {
         let grid = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Quarter, 4);
-        let arrangement = Arrangement::new(
-            ArrangementTemplate::SynthwaveStraight,
-            grid.total_duration_ms(),
-            grid.bar_count,
-        );
+        let arrangement = empty_arrangement(ArrangementTemplate::SynthwaveStraight, &grid);
 
         let options = MidiExportOptions::default();
         let result = export_midi(&arrangement, &grid, &options);
@@ -348,11 +358,7 @@ mod tests {
     #[test]
     fn test_export_with_notes() {
         let grid = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Quarter, 4);
-        let mut arrangement = Arrangement::new(
-            ArrangementTemplate::SynthwaveStraight,
-            grid.total_duration_ms(),
-            grid.bar_count,
-        );
+        let mut arrangement = empty_arrangement(ArrangementTemplate::SynthwaveStraight, &grid);
 
         // Create a kick lane with one note
         let mut kick_lane = DrumLane::new("KICK", MIDI_KICK);
@@ -385,11 +391,7 @@ mod tests {
     #[test]
     fn test_export_options() {
         let grid = Grid::new(140.0, TimeSignature::FourFour, GridDivision::Eighth, 8);
-        let arrangement = Arrangement::new(
-            ArrangementTemplate::SynthwaveStraight,
-            grid.total_duration_ms(),
-            grid.bar_count,
-        );
+        let arrangement = empty_arrangement(ArrangementTemplate::SynthwaveStraight, &grid);
 
         // Test with different PPQ
         let options_high_ppq = MidiExportOptions {
@@ -468,11 +470,7 @@ mod tests {
     /// Arrangement with one DRUMS_KICK note (percussion) and one BASS note (melodic).
     fn two_lane_arrangement() -> Arrangement {
         let grid = test_grid();
-        let mut arrangement = Arrangement::new(
-            ArrangementTemplate::SynthwaveStraight,
-            grid.total_duration_ms(),
-            grid.bar_count,
-        );
+        let mut arrangement = empty_arrangement(ArrangementTemplate::SynthwaveStraight, &grid);
 
         let mut kick_lane = DrumLane::new("DRUMS_KICK", MIDI_KICK);
         kick_lane.add_note(ArrangedNote::new(0.0, 100.0, 100, None, None));

@@ -773,11 +773,16 @@ pub fn arrange_events_command(input: ArrangeEventsInput) -> CommandResult<Arrang
     // Parse template
     let template = ArrangementTemplate::from_string(&input.template);
 
-    // Get theme by name
+    // Get theme by name. Unknown names must NOT hard-error — a persisted Run may
+    // reference a since-renamed/removed theme. Fall back to BLADE RUNNER and let
+    // the arranger snapshot the RESOLVED canonical name into the Arrangement.
     let theme = match crate::themes::get_theme(&input.theme_name) {
         Some(t) => t,
         None => {
-            // Fallback to first available theme
+            log::warn!(
+                "unknown theme '{}', falling back to BLADE RUNNER",
+                input.theme_name
+            );
             crate::themes::get_theme("BLADE RUNNER").expect("Theme must exist")
         }
     };

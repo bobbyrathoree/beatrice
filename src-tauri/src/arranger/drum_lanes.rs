@@ -122,11 +122,25 @@ pub struct Arrangement {
     pub template: ArrangementTemplate,
     pub total_duration_ms: f64,
     pub bar_count: u32,
+
+    /// Canonical resolved theme name (post-fallback), exact bpm, and the
+    /// theme's render-time sound snapshot — makes an Arrangement self-contained
+    /// for playback/export.
+    pub theme_name: String,
+    pub bpm: f64,
+    pub sound: crate::themes::ThemeSound,
 }
 
 impl Arrangement {
     /// Create a new empty arrangement
-    pub fn new(template: ArrangementTemplate, total_duration_ms: f64, bar_count: u32) -> Self {
+    pub fn new(
+        template: ArrangementTemplate,
+        total_duration_ms: f64,
+        bar_count: u32,
+        theme_name: String,
+        bpm: f64,
+        sound: crate::themes::ThemeSound,
+    ) -> Self {
         Arrangement {
             drum_lanes: Vec::new(),
             bass_lane: None,
@@ -135,6 +149,9 @@ impl Arrangement {
             template,
             total_duration_ms,
             bar_count,
+            theme_name,
+            bpm,
+            sound,
         }
     }
 
@@ -174,7 +191,14 @@ impl Arrangement {
         let song_bars = base_bars * 4;
         let song_duration = base_duration * 4.0;
 
-        let mut song = Arrangement::new(self.template, song_duration, song_bars);
+        let mut song = Arrangement::new(
+            self.template,
+            song_duration,
+            song_bars,
+            self.theme_name.clone(),
+            self.bpm,
+            self.sound,
+        );
 
         // Helper: clone a lane's events into a section, offset by section start time
         let clone_lane_to_section = |lane: &DrumLane, section: usize, fade: bool| -> Vec<ArrangedNote> {
@@ -312,7 +336,14 @@ pub fn arrange_events(
     let fidelity = fidelity.clamp(0.0, 1.0);
     let total_duration = grid.total_duration_ms();
 
-    let mut arrangement = Arrangement::new(*template, total_duration, grid.bar_count);
+    let mut arrangement = Arrangement::new(
+        *template,
+        total_duration,
+        grid.bar_count,
+        theme.name.clone(),
+        grid.bpm,
+        theme.sound,
+    );
 
     // Create drum lanes (Standard GM MIDI notes)
     let mut kick_lane = DrumLane::new("DRUMS_KICK", MIDI_KICK);
@@ -360,7 +391,13 @@ pub fn arrange_events(
                 // the SAME placed_time so it can't desync from a moved kick, and its
                 // pattern index derives from the placed position, not the raw one.
                 if b_emphasis > 0.3 {
-                    let bass_velocity = (velocity as f32 * b_emphasis) as u8;
+                    // Themed ceiling: source velocity scaled by b_emphasis (clamped
+                    // to [0,1] here) against the theme's bass stab max velocity.
+                    let bass_velocity = ((velocity as f32 / 127.0)
+                        * b_emphasis.clamp(0.0, 1.0)
+                        * theme.bass_stab_max_velocity as f32)
+                        .round()
+                        .clamp(1.0, 127.0) as u8;
 
                     // Harmonic context resolved at the note's actual sounding time.
                     let chord_type = theme.get_chord_at_time(placed_time, grid);
@@ -841,6 +878,93 @@ mod tests {
                 b.timestamp_ms
             );
         }
+    }
+
+    #[test]
+    fn arrangement_snapshots_theme_metadata() {
+        // ST @ bpm 112.5 → theme_name "STRANGER THINGS", bpm 112.5, sound == ST.sound.
+        let grid = Grid::new(112.5, TimeSignature::FourFour, GridDivision::Sixteenth, 2);
+        let theme = crate::themes::get_theme("STRANGER THINGS").unwrap();
+        let events: Vec<QuantizedEvent> = vec![create_quantized_event(
+            create_test_event(0.0, EventClass::BilabialPlosive),
+            GridPosition { bar: 0, beat: 0, subdivision: 0 },
+        )];
+
+        let arr = arrange_events(
+            &events,
+            &ArrangementTemplate::ArpDrive,
+            &grid,
+            &theme,
+            0.6,
+            0.8,
+        );
+
+        assert_eq!(arr.theme_name, "STRANGER THINGS");
+        assert_eq!(arr.bpm, 112.5);
+        assert_eq!(arr.sound, theme.sound);
+    }
+
+    #[test]
+    fn expand_to_song_preserves_metadata() {
+        let grid = Grid::new(112.5, TimeSignature::FourFour, GridDivision::Sixteenth, 2);
+        let theme = crate::themes::get_theme("STRANGER THINGS").unwrap();
+        let events: Vec<QuantizedEvent> = vec![create_quantized_event(
+            create_test_event(0.0, EventClass::BilabialPlosive),
+            GridPosition { bar: 0, beat: 0, subdivision: 0 },
+        )];
+
+        let base = arrange_events(
+            &events,
+            &ArrangementTemplate::ArpDrive,
+            &grid,
+            &theme,
+            0.6,
+            0.8,
+        );
+        let song = base.expand_to_song();
+
+        assert_eq!(song.theme_name, base.theme_name);
+        assert_eq!(song.bpm, base.bpm);
+        assert_eq!(song.sound, base.sound);
+    }
+
+    #[test]
+    fn bass_stab_velocity_respects_theme_ceiling() {
+        // vel 127 × b_emphasis 1.0 hits the theme ceiling exactly: BR→100, ST→90.
+        // A single loud B event on beat 1.
+        let grid = Grid::new(120.0, TimeSignature::FourFour, GridDivision::Sixteenth, 1);
+
+        // Build one max-velocity B event (confidence 1.0, peak 1.0 → velocity 127).
+        let loud = |ts: f64| {
+            let mut feats = EventFeatures::zero();
+            feats.peak_amplitude = 1.0;
+            let ev = Event::new(ts, 50.0, EventClass::BilabialPlosive, 1.0, feats);
+            create_quantized_event(ev, GridPosition { bar: 0, beat: 0, subdivision: 0 })
+        };
+
+        for (name, ceiling) in [("BLADE RUNNER", 100u8), ("STRANGER THINGS", 90u8)] {
+            let theme = crate::themes::get_theme(name).unwrap();
+            let arr = arrange_events(&[loud(0.0)], &ArrangementTemplate::SynthwaveStraight, &grid, &theme, 1.0, 1.0);
+            let bass = arr.bass_lane.as_ref().unwrap();
+            assert_eq!(bass.events.len(), 1, "{name}: one bass note expected");
+            assert_eq!(
+                bass.events[0].velocity, ceiling,
+                "{name}: vel 127 × 1.0 × ceiling/127 should equal {ceiling}"
+            );
+        }
+
+        // vel 64 × b_emphasis 0.8, BR → round(64/127*0.8*100) = round(40.31) = 40.
+        // confidence 0.0, peak amp mapped so calculate_velocity == 64:
+        //   64 = 60 + factor*67 → factor = 4/67 ≈ 0.0597; amp*0.7 = factor → amp ≈ 0.0853.
+        let theme_br = crate::themes::get_theme("BLADE RUNNER").unwrap();
+        let mut feats = EventFeatures::zero();
+        feats.peak_amplitude = 4.0 / 67.0 / 0.7;
+        let ev = Event::new(0.0, 50.0, EventClass::BilabialPlosive, 0.0, feats);
+        let qe = create_quantized_event(ev, GridPosition { bar: 0, beat: 0, subdivision: 0 });
+        let arr = arrange_events(&[qe], &ArrangementTemplate::SynthwaveStraight, &grid, &theme_br, 0.8, 1.0);
+        let bass = arr.bass_lane.as_ref().unwrap();
+        assert_eq!(bass.events.len(), 1);
+        assert_eq!(bass.events[0].velocity, 40, "round(64/127*0.8*100) = 40");
     }
 
     #[test]
