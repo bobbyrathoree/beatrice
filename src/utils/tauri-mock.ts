@@ -15,6 +15,18 @@
  *   real `TAURI_INVOKE` would reject — this is what surfaces snake_case/camelCase bugs.
  */
 
+import type {
+  Theme,
+  ThemeSummary,
+  ChordType,
+  ScaleFamily,
+  BassPattern,
+  ArpPattern,
+} from '../bindings';
+
+// Type-only import (erased at runtime, so no circular dependency with the
+// generated bindings that resolve `invoke` through this very module).
+
 // Stub classes required by @tauri-apps/plugin-fs when aliased through this mock
 export class Resource {
   readonly rid: number;
@@ -40,10 +52,28 @@ export const isTauriAvailable = (): boolean => {
   return typeof window !== 'undefined' && '__TAURI__' in window;
 };
 
+/**
+ * Deterministic PRNG (mulberry32). The fabricated-events generator is seeded
+ * with a fixed constant so browser demo arrangements are identical run-to-run
+ * (a moving arrangement would make the Pages demo flaky and un-screenshotable).
+ * `get_recording_level`'s Math.random stays live — it's cosmetic UI only.
+ */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 // Generate mock event data that matches the Rust EventData struct
 function generateMockEvents(audioBytes: number[]): any[] {
   const events = [];
   const classes = ['BilabialPlosive', 'HihatNoise', 'Click', 'HumVoiced'];
+  const rand = mulberry32(0xbea717ce);
 
   // Simple peak detection on audio to create realistic-looking events
   const sampleRate = 44100;
@@ -57,10 +87,10 @@ function generateMockEvents(audioBytes: number[]): any[] {
   const interval = durationMs / numEvents;
 
   for (let i = 0; i < numEvents; i++) {
-    const timestamp = i * interval + (Math.random() * 20 - 10);
+    const timestamp = i * interval + (rand() * 20 - 10);
     const classIdx = i % classes.length;
     const winnerClass = classes[classIdx];
-    const confidence = 0.7 + Math.random() * 0.25;
+    const confidence = 0.7 + rand() * 0.25;
 
     // Plausible per-class scores: the classified winner gets `confidence`, the
     // rest get lower decaying scores. Mirrors the Rust `ClassScore[]` shape so
@@ -76,7 +106,7 @@ function generateMockEvents(audioBytes: number[]): any[] {
     events.push({
       id: `mock-event-${i}`,
       timestamp_ms: Math.max(0, timestamp),
-      duration_ms: 50 + Math.random() * 30,
+      duration_ms: 50 + rand() * 30,
       class: winnerClass,
       confidence,
       features: {
@@ -85,7 +115,7 @@ function generateMockEvents(audioBytes: number[]): any[] {
         low_band_energy: classIdx === 0 ? 0.6 : classIdx === 1 ? 0.05 : classIdx === 2 ? 0.2 : 0.3,
         mid_band_energy: classIdx === 0 ? 0.3 : classIdx === 1 ? 0.25 : classIdx === 2 ? 0.6 : 0.45,
         high_band_energy: classIdx === 0 ? 0.1 : classIdx === 1 ? 0.7 : classIdx === 2 ? 0.2 : 0.25,
-        peak_amplitude: 0.5 + Math.random() * 0.4,
+        peak_amplitude: 0.5 + rand() * 0.4,
       },
       all_scores,
     });
@@ -94,30 +124,125 @@ function generateMockEvents(audioBytes: number[]): any[] {
   return events;
 }
 
-// Theme -> chord voicings, mirroring themes/types.rs (scale_notes + chord_notes)
-// and themes/{blade_runner,stranger_things}.rs. Natural-minor scale, triads by
-// scale degree, voiced one octave down to match the pad register the mock has
-// always used. Keeps the browser demo's harmony in sync with the native path.
-const NATURAL_MINOR = [0, 2, 3, 5, 7, 8, 10];
-const CHORD_DEGREE: Record<string, number> = {
+// ── Theme registry (single source of truth for the browser mock) ─────────────
+//
+// Full `Theme` objects, typed `satisfies Theme[]` against the generated binding
+// so any drift from the Rust source of truth (themes/*.rs) fails `tsc`. Every
+// mock theme accessor (get_theme/list_themes/list_theme_names) and all harmony
+// derivation reads from here — adding a theme is a one-entry append (theme #3
+// needs NO mock harmony edits).
+const MOCK_THEMES = [
+  {
+    name: 'BLADE RUNNER',
+    bpm_range: [80, 100],
+    root_note: 62, // D
+    scale_family: 'NaturalMinor',
+    chord_progression: { chords: ['Im', 'VI', 'III', 'VII'], bars_per_chord: 2 },
+    bass_pattern: 'RootFifth',
+    arp_pattern: 'Up158',
+    arp_octave_range: [-1, 1],
+    default_template: 'synthwave_halftime',
+    sound: { drum_palette: 'SynthwaveDrums', fx_profile: 'GatedReverb', pad_sustain: true },
+    bass_stab_max_velocity: 100,
+  },
+  {
+    name: 'STRANGER THINGS',
+    bpm_range: [100, 120],
+    root_note: 60, // C
+    scale_family: 'NaturalMinor',
+    chord_progression: { chords: ['Im', 'VII', 'VI', 'VII'], bars_per_chord: 2 },
+    bass_pattern: 'OffbeatEighths',
+    arp_pattern: 'Up158',
+    arp_octave_range: [0, 2],
+    default_template: 'arp_drive',
+    sound: { drum_palette: 'TR808', fx_profile: 'DarkDelay', pad_sustain: false },
+    bass_stab_max_velocity: 90,
+  },
+] satisfies Theme[];
+
+// Descriptions copied verbatim from the Rust THEME_REGISTRY (themes/mod.rs). Kept
+// beside the themes (ThemeSummary carries them) rather than on Theme itself.
+const THEME_DESCRIPTIONS: Record<string, string> = {
+  'BLADE RUNNER':
+    'D minor, i–VI–III–VII (Dm–Bb–F–C). Root-fifth bass, halftime groove. Layered synthwave kit, gated reverb, long sustained pads.',
+  'STRANGER THINGS':
+    'C minor, i–VII–VI–VII (Cm–Bb–Ab–Bb). Driving offbeat bass, arp-led groove. TR808-style kit, dark filtered delay, short rhythmic pads.',
+};
+
+/** Resolve a theme by name (case-insensitive), BLADE RUNNER fallback like Rust. */
+function resolveMockTheme(themeName?: string): Theme {
+  const target = (themeName || 'BLADE RUNNER').toUpperCase();
+  return MOCK_THEMES.find((t) => t.name.toUpperCase() === target) ?? MOCK_THEMES[0];
+}
+
+// Scale intervals by family — mirrors themes/types.rs `scale_notes`. All five
+// families present so a theme #3 in any mode derives correct harmony unchanged.
+const SCALE_INTERVALS: Record<ScaleFamily, number[]> = {
+  MinorPentatonic: [0, 3, 5, 7, 10],
+  NaturalMinor: [0, 2, 3, 5, 7, 8, 10],
+  HarmonicMinor: [0, 2, 3, 5, 7, 8, 11],
+  Dorian: [0, 2, 3, 5, 7, 9, 10],
+  Phrygian: [0, 1, 3, 5, 7, 8, 10],
+};
+
+// Chord degree (0-indexed scale degree) per chord type — mirrors `chord_notes`.
+const CHORD_DEGREE: Record<ChordType, number> = {
   I: 0, Im: 0, II: 1, IIm: 1, III: 2, IIIm: 2, IV: 3, IVm: 3,
   V: 4, Vm: 4, VI: 5, VIm: 5, VII: 6, VIIm: 6,
 };
-const THEME_HARMONY: Record<string, { root: number; progression: string[] }> = {
-  'BLADE RUNNER': { root: 62, progression: ['Im', 'VI', 'III', 'VII'] },   // D minor
-  'STRANGER THINGS': { root: 60, progression: ['Im', 'VII', 'VI', 'VII'] }, // C minor
-};
 
-function themeChords(themeName?: string): { root: number; third: number; fifth: number }[] {
-  const theme = THEME_HARMONY[(themeName || 'BLADE RUNNER').toUpperCase()] ?? THEME_HARMONY['BLADE RUNNER'];
-  const scale = NATURAL_MINOR.map((i) => theme.root + i);
-  return theme.progression.map((chord) => {
+interface Chord { root: number; third: number; fifth: number }
+
+// Derive the chord voicings for a theme from its own root_note / scale_family /
+// chord_progression (mirrors themes/types.rs scale_notes + chord_notes), voiced
+// one octave below the theme root (the -12 the pad register has always used) so
+// BLADE RUNNER stays byte-identical to the previous hardcoded Dm–Bb–F–C.
+function themeChords(theme: Theme): Chord[] {
+  const scale = SCALE_INTERVALS[theme.scale_family].map((i) => theme.root_note + i);
+  return theme.chord_progression.chords.map((chord) => {
     const degree = CHORD_DEGREE[chord] ?? 0;
-    const chordRoot = scale[degree] ?? theme.root;
+    const chordRoot = scale[degree] ?? theme.root_note;
     const thirdOffset = chord.endsWith('m') ? 3 : 4; // minor vs major triad
-    // Voice one octave below the theme root (the -12 the pad register uses).
     return { root: chordRoot - 12, third: chordRoot + thirdOffset - 12, fifth: chordRoot + 7 - 12 };
   });
+}
+
+// Bass note selection per pattern — mirrors themes/types.rs `bass_notes`
+// (chord.root === chordRoot-12; fifth === root+7; seventh === root+10). Indexed
+// by the mock's simplified per-beat slot. RootFifth reproduces the previous
+// hardcoded root/fifth alternation exactly, so BLADE RUNNER bass is unchanged.
+const BASS_PATTERN_NOTES: Record<BassPattern, (chord: Chord, slot: number) => number> = {
+  Root: (c) => c.root,
+  RootFifth: (c, slot) => (slot % 2 === 0 ? c.root : c.root + 7),
+  OffbeatEighths: (c) => c.root,
+  Walking: (c, slot) => [c.root, c.root + 3, c.root + 7, c.root + 10][slot % 4],
+};
+
+// Arpeggio sequence per pattern — mirrors themes/types.rs `arp_notes`: expand the
+// chord across the octave range, then order by pattern. The chord tones are
+// lifted back to the theme-root register (+12 undoes the pad-register voicing).
+const ARP_PATTERN_ORDER: Record<ArpPattern, (notes: number[]) => number[]> = {
+  Up158: (notes) => notes,
+  Down851: (notes) => [...notes].reverse(),
+  Alternating: (notes) => {
+    const out: number[] = [];
+    const len = notes.length;
+    for (let i = 0; i < len; i++) out.push(i % 2 === 0 ? notes[i] : notes[len - 1 - i]);
+    return out;
+  },
+  Random: (notes) => notes, // deterministic mock: sorted, like the Rust stub
+};
+
+function arpSequence(chord: Chord, pattern: ArpPattern, [lo, hi]: [number, number]): number[] {
+  const triad = [chord.root + 12, chord.third + 12, chord.fifth + 12]; // theme-root register
+  const notes: number[] = [];
+  for (let oct = lo; oct <= hi; oct++) {
+    for (const n of triad) {
+      const shifted = n + oct * 12;
+      if (shifted >= 0 && shifted < 128) notes.push(shifted);
+    }
+  }
+  return ARP_PATTERN_ORDER[pattern](notes);
 }
 
 // Build the mock Arrangement from quantized events (mirrors Rust arranger + expand_to_song)
@@ -134,8 +259,13 @@ function buildMockArrangement(args: Record<string, any>): unknown {
   // quantized position; lower fidelity ("PRODUCE FOR ME") pulls each hit toward the
   // nearest template slot (a beat), clamped to [0.0, 1.0]. Event count never changes.
   const fidelity = Math.min(1, Math.max(0, args?.input?.fidelity ?? 0.8));
+  const bEmphasis = args?.input?.b_emphasis ?? 0.6;
   const totalDurationMs = (barCount * 4 * 60000) / bpm;
   const template = args?.input?.template || 'synthwave_straight';
+
+  // Resolve the theme through the mock registry (BLADE RUNNER fallback like Rust)
+  // so every note-selection decision derives from the theme's own patterns.
+  const theme = resolveMockTheme(args?.input?.theme_name);
 
   // Sort events into drum lanes by class
   const kickEvents: any[] = [];
@@ -154,7 +284,7 @@ function buildMockArrangement(args: Record<string, any>): unknown {
   // are voiced one octave below the theme root (the -12 the pad register has
   // always used), so BLADE RUNNER stays byte-identical to the previous
   // hardcoded Dm–Bb–F–C.
-  const chords = themeChords(args?.input?.theme_name);
+  const chords = themeChords(theme);
 
   let arpCounter = 0;
 
@@ -184,20 +314,28 @@ function buildMockArrangement(args: Record<string, any>): unknown {
     if (cls.includes('bilabial')) {
       kickEvents.push(note);
 
-      // Bass pattern: Root on downbeats, Fifth on upbeats/offbeats
-      const beatInBar = Math.floor((timestamp % msPerBar) / msPerBeat);
-      const isOffbeat = beatInBar % 2 !== 0;
-      const bassMidi = isOffbeat ? currentChord.fifth - 12 : currentChord.root - 12;
-
-      bassEvents.push({ ...note, duration_ms: 200, midi_note: bassMidi });
+      // Bass note SELECTION is pattern-driven (mirrors themes/types.rs bass_notes).
+      // Gate + velocity mirror the Rust arranger exactly:
+      //   fire only when b_emphasis > 0.3; velocity =
+      //   round(source/127 * clamp(b_emphasis,0,1) * bass_stab_max_velocity).
+      if (bEmphasis > 0.3) {
+        const beatInBar = Math.floor((timestamp % msPerBar) / msPerBeat);
+        const bassMidi = BASS_PATTERN_NOTES[theme.bass_pattern](currentChord, beatInBar) - 12;
+        const bassVelocity = Math.min(
+          127,
+          Math.max(1, Math.round((note.velocity / 127) * Math.min(1, Math.max(0, bEmphasis)) * theme.bass_stab_max_velocity)),
+        );
+        bassEvents.push({ ...note, duration_ms: 200, velocity: bassVelocity, midi_note: bassMidi });
+      }
     }
     else if (cls.includes('hihat')) {
       hihatEvents.push(note);
 
-      // Rhythmic Puppeteering for Arps
+      // Rhythmic Puppeteering for Arps — sequence derived from the theme's arp
+      // pattern + octave range (mirrors themes/types.rs arp_notes).
       if (template === 'arp_drive') {
-        const arpPattern = [currentChord.root + 12, currentChord.third + 12, currentChord.fifth + 12, currentChord.root + 24];
-        const arpMidi = arpPattern[arpCounter % arpPattern.length];
+        const arpSeq = arpSequence(currentChord, theme.arp_pattern, theme.arp_octave_range);
+        const arpMidi = arpSeq[arpCounter % arpSeq.length];
         arpEvents.push({ ...note, duration_ms: 150, velocity: note.velocity * 0.9, midi_note: arpMidi });
         arpCounter++;
       }
@@ -261,6 +399,11 @@ function buildMockArrangement(args: Record<string, any>): unknown {
     template,
     total_duration_ms: baseDurationMs * 4,
     bar_count: barCount * 4,
+    // Self-contained theme metadata (mirrors Rust Arrangement): canonical resolved
+    // name, exact bpm, render-time sound snapshot — no side-channel theme lookup.
+    theme_name: theme.name,
+    bpm,
+    sound: theme.sound,
   };
 }
 
@@ -439,32 +582,27 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   // --- Themes (match Rust ThemeSummary / Theme structs) ---
-  // Values mirror src-tauri/src/themes/{blade_runner,stranger_things}.rs exactly.
-  list_themes: () => [
-    { name: 'BLADE RUNNER', description: 'D minor, i–VI–III–VII (Dm–Bb–F–C). Root-fifth bass, slower tempo. Darker, more spacious harmony.', bpm_range: [80, 100], root_note: 62, scale_family: 'NaturalMinor' },
-    { name: 'STRANGER THINGS', description: 'C minor, i–VII–VI–VII (Cm–Bb–Ab–Bb). Driving offbeat bass, faster tempo. Tenser, more restless harmony.', bpm_range: [100, 120], root_note: 60, scale_family: 'NaturalMinor' },
-  ],
+  // All derive from the single MOCK_THEMES registry (mirrors themes/mod.rs).
+  list_themes: (): ThemeSummary[] =>
+    MOCK_THEMES.map((t) => ({
+      name: t.name,
+      description: THEME_DESCRIPTIONS[t.name] ?? '',
+      bpm_range: t.bpm_range,
+      root_note: t.root_note,
+      scale_family: t.scale_family,
+      default_template: t.default_template,
+    })),
 
-  get_theme: (a) => {
+  // get_theme mirrors the Rust command: an exact/case-insensitive miss returns
+  // null (the command is `Option<Theme>`), NOT a fallback — the fallback lives in
+  // arrange_events_command. resolveMockTheme (BR fallback) is for arrangement only.
+  get_theme: (a): Theme | null => {
     requireKeys(a, ['name']);
-    const name = (a.name || 'BLADE RUNNER').toUpperCase();
-    if (name === 'STRANGER THINGS') {
-      return {
-        name: 'STRANGER THINGS', bpm_range: [100, 120], root_note: 60, scale_family: 'NaturalMinor',
-        chord_progression: { chords: ['Im', 'VII', 'VI', 'VII'], bars_per_chord: 2 },
-        bass_pattern: 'OffbeatEighths', arp_pattern: 'Up158', arp_octave_range: [0, 2],
-        drum_palette: 'SynthwaveDrums', fx_profile: 'DarkDelay', synth_stab_velocity: 90, pad_sustain: false,
-      };
-    }
-    return {
-      name: 'BLADE RUNNER', bpm_range: [80, 100], root_note: 62, scale_family: 'NaturalMinor',
-      chord_progression: { chords: ['Im', 'VI', 'III', 'VII'], bars_per_chord: 2 },
-      bass_pattern: 'RootFifth', arp_pattern: 'Up158', arp_octave_range: [-1, 1],
-      drum_palette: 'SynthwaveDrums', fx_profile: 'GatedReverb', synth_stab_velocity: 100, pad_sustain: true,
-    };
+    const target = (a.name || '').toUpperCase();
+    return MOCK_THEMES.find((t) => t.name.toUpperCase() === target) ?? null;
   },
 
-  list_theme_names: () => ['BLADE RUNNER', 'STRANGER THINGS'],
+  list_theme_names: (): string[] => MOCK_THEMES.map((t) => t.name),
 
   // --- Calibration ---
   list_calibration_profiles: () => [],

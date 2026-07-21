@@ -368,7 +368,13 @@ arp_lane: DrumLane | null;
 /**
  * Arrangement metadata
  */
-template: ArrangementTemplate; total_duration_ms: number; bar_count: number }
+template: ArrangementTemplate; total_duration_ms: number; bar_count: number; 
+/**
+ * Canonical resolved theme name (post-fallback), exact bpm, and the
+ * theme's render-time sound snapshot — makes an Arrangement self-contained
+ * for playback/export.
+ */
+theme_name: string; bpm: number; sound: ThemeSound }
 /**
  * Arrangement template defines the overall musical style
  */
@@ -470,9 +476,10 @@ midi_note: number;
  */
 events: ArrangedNote[] }
 /**
- * Drum kit palettes
+ * Drum kit palettes — every variant must have a distinct implemented sound
+ * in the TS synth (src/audio/timbre.ts). Do not add variants without a DSP mapping.
  */
-export type DrumPalette = "SynthwaveDrums" | "AcousticKit" | "TR808"
+export type DrumPalette = "SynthwaveDrums" | "TR808"
 export type EstimateTempoInput = { file_path: string }
 /**
  * A detected beatbox event with timing, classification, and features
@@ -610,9 +617,6 @@ export type ExportMidiInput = { arrangement: Arrangement; bpm: number; time_sign
  */
 phase_offset_ms?: number | null }
 export type ExtractFeaturesInput = { audio_data: number[]; start_ms: number; duration_ms: number }
-/**
- * Effects profiles
- */
 export type FxProfile = "GatedReverb" | "WideChorus" | "DarkDelay" | "Dry"
 /**
  * Grid position - describes location in musical time
@@ -704,11 +708,21 @@ phase_offset_ms: number }
 /**
  * Complete theme definition
  */
-export type Theme = { name: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily; chord_progression: ChordProgression; bass_pattern: BassPattern; arp_pattern: ArpPattern; arp_octave_range: [number, number]; drum_palette: DrumPalette; fx_profile: FxProfile; synth_stab_velocity: number; pad_sustain: boolean }
+export type Theme = { name: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily; chord_progression: ChordProgression; bass_pattern: BassPattern; arp_pattern: ArpPattern; arp_octave_range: [number, number]; default_template: ArrangementTemplate; sound: ThemeSound; 
+/**
+ * Ceiling for B-triggered bass stab velocity (applied by the arranger:
+ * source_velocity/127 * b_emphasis * this). Arrangement data, not timbre.
+ */
+bass_stab_max_velocity: number }
+/**
+ * The render-time sound identity of a theme. Snapshot into every Arrangement
+ * so playback/export need no side-channel theme lookup.
+ */
+export type ThemeSound = { drum_palette: DrumPalette; fx_profile: FxProfile; pad_sustain: boolean }
 /**
  * Theme summary for UI display
  */
-export type ThemeSummary = { name: string; description: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily }
+export type ThemeSummary = { name: string; description: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily; default_template: ArrangementTemplate }
 export type UpdateCalibrationProfileInput = { id: string; name: string | null; notes: string | null }
 export type UpdateRunStatusInput = { run_id: string; status: string }
 

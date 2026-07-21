@@ -48,6 +48,25 @@ describe("mock <-> bindings parity", () => {
     }));
     expect(arr.drum_lanes.length).toBeGreaterThan(0);
     expect(typeof arr.total_duration_ms).toBe("number");
+
+    // Self-contained theme metadata snapshot (mirrors the Rust Arrangement).
+    expect(arr.theme_name).toBe("BLADE RUNNER");
+    expect(typeof arr.bpm).toBe("number");
+    const brSound = unwrap(await commands.getTheme("BLADE RUNNER"))!.sound;
+    expect(arr.sound).toEqual(brSound);
+  });
+
+  it("arrange falls back to BLADE RUNNER for an unknown theme (resolved name snapshot)", async () => {
+    const { commands, unwrap } = await import("./types/ipc");
+    const arr = unwrap(await commands.arrangeEventsCommand({
+      events: [], template: "synthwave_straight", theme_name: "NOPE", bpm: 120,
+      time_signature: "four_four", division: "sixteenth", feel: "straight", swing_amount: 0,
+      bar_count: 4, b_emphasis: 0.6,
+    }));
+    // Unknown name resolves to the canonical BLADE RUNNER (like the Rust command).
+    expect(arr.theme_name).toBe("BLADE RUNNER");
+    const brSound = unwrap(await commands.getTheme("BLADE RUNNER"))!.sound;
+    expect(arr.sound).toEqual(brSound);
   });
 
   it("detect_events with calibration flags mirrors the Rust contract", async () => {

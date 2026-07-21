@@ -34,16 +34,16 @@ import type { Project, Run } from "./store/useStore";
 import type { ProjectSummary } from "./hooks/useProjects";
 import type { EventDecision } from "./types/explainability";
 import { EVENT_CLASS_NAMES } from "./types/explainability";
-import { mapThemeNameToTemplate } from "./utils/themeTemplate";
+import { mapThemeNameToTemplate, templateForTheme } from "./utils/themeTemplate";
 import "./styles/brutalist.css";
 
 type AppState = "input" | "recording" | "jam" | "processing" | "results";
 
-// Map a selected theme to an arrangement template name. Thin wrapper over the
-// shared, unit-tested name→template resolver so a Theme object and a persisted
-// run.theme string both map identically.
+// Map a selected theme to an arrangement template name. Prefers the theme's own
+// typed `default_template` (Rust source of truth), falling back to the name map
+// only when no Theme object is available.
 function mapThemeToTemplate(theme: Theme | null): string {
-  return mapThemeNameToTemplate(theme?.name);
+  return templateForTheme(theme);
 }
 
 // Full result of a pipeline run, shared with the results-screen components.
@@ -328,7 +328,9 @@ function App() {
             await commands.createRun({
               project_id: projectId,
               pipeline_version: "0.1.0",
-              theme: selectedTheme?.name || "default",
+              // Persist the canonical resolved theme name the arranger snapshotted
+              // (post-fallback), so replay round-trips through get_theme cleanly.
+              theme: arrangement.theme_name,
               bpm: tempoResult.bpm,
               swing: gridSettings.swing_amount,
               quantize_strength: quantizeSettings.strength,
@@ -554,8 +556,10 @@ function App() {
       // groove tweak would silently re-arrange with the previously-selected
       // theme. Best-effort: an unknown/removed theme just leaves the current
       // selection (replay still uses run.theme directly for its arrangement).
+      // The fetched theme (if any) also drives the replay template below.
+      let runTheme: Theme | null = null;
       try {
-        const runTheme = unwrap(await commands.getTheme(run.theme));
+        runTheme = unwrap(await commands.getTheme(run.theme));
         if (runTheme) {
           setSelectedTheme(runTheme);
         }
@@ -618,10 +622,11 @@ function App() {
           const arrangement = unwrap(
             await commands.arrangeEventsCommand({
               events: quantized,
-              // Derive the template from the run's persisted theme, not the
-              // current UI selection — otherwise replay would arrange with a
-              // template from whatever theme happens to be selected now.
-              template: mapThemeNameToTemplate(run.theme),
+              // Derive the template from the FETCHED theme when available (its
+              // typed default_template is the source of truth); fall back to the
+              // legacy name map for unknown/removed themes. Never the current UI
+              // selection — replay must reflect the run's own theme.
+              template: runTheme ? templateForTheme(runTheme) : mapThemeNameToTemplate(run.theme),
               theme_name: run.theme,
               bpm: run.bpm,
               time_signature: gridSettings.time_signature,
