@@ -240,6 +240,7 @@ export function ExportControls({
         {/* WAV Export Button */}
         <motion.button
           className="btn btn-secondary"
+          data-testid="export-wav"
           onClick={handleExportWav}
           disabled={disabled || wavState.disabled}
           whileHover={!disabled && !wavState.disabled ? { scale: 1.02, y: -2 } : {}}

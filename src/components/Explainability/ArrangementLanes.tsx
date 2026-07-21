@@ -47,6 +47,11 @@ export function ArrangementLanes({ arrangement, currentTime, isPlaying }: Arrang
 
   return (
     <motion.div
+      // Deterministic settle signal for e2e: exposes the CANONICAL resolved theme
+      // name from the arrangement itself (post-fallback), not the UI selection, so
+      // a spec can wait for the debounced re-arrange to actually land before
+      // exporting instead of sleeping. See e2e/themeSound.spec.ts.
+      data-arrangement-theme={arrangement.theme_name}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       style={{
