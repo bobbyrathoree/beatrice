@@ -45,6 +45,9 @@ test-audio/
 # Claude Code
 CLAUDE.md
 
+# Superpowers SDD scratch (briefs, reports, audition WAVs) — never tracked
+.superpowers/
+
 # Rust build outputs (Cargo workspace uses a single root target/ dir)
 /target/
 crates/*/target/
