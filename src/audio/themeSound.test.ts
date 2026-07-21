@@ -132,16 +132,22 @@ function padTo(x: Float32Array, len: number): Float32Array {
 }
 
 describe("theme sounds differ measurably (A/B)", () => {
-  it("same_sound_renders_byte_equal", () => {
+  it("same_sound_renders_identical_within_1lsb", () => {
+    // Deterministic control: identical sound → identical samples to within
+    // ±1 LSB. The seeded synthesis is exactly reproducible, but ConvolverNode
+    // convolution is not guaranteed bit-reproducible under thread scheduling
+    // (observed once under full-suite CPU load; same root cause as the
+    // Chromium ±1-LSB jitter documented in e2e/themeSound.spec.ts). Real
+    // nondeterminism (unseeded noise, moved notes) diffs by ≫ 1 LSB.
     expect(brA.length).toBe(brB.length);
-    let firstDiff = -1;
-    for (let i = 0; i < brA.length; i++) {
-      if (brA[i] !== brB[i]) {
-        firstDiff = i;
-        break;
-      }
+    const sa = new Int16Array(brA.buffer, 44);
+    const sb = new Int16Array(brB.buffer, 44);
+    let maxAbsDiff = 0;
+    for (let i = 0; i < sa.length; i++) {
+      const d = Math.abs(sa[i] - sb[i]);
+      if (d > maxAbsDiff) maxAbsDiff = d;
     }
-    expect(firstDiff).toBe(-1); // deterministic control: identical sound → identical bytes
+    expect(maxAbsDiff).toBeLessThanOrEqual(1);
   });
 
   it("different_sound_renders_differ_in_band_energy", () => {
