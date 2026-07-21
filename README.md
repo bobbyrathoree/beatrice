@@ -69,7 +69,7 @@ Tempo (auto-detected), time signature, grid division, feel (straight/swing/halft
 
 ### Export
 ![Export](docs/screenshots/05-export.png)
-Export MIDI for any DAW (Ableton, Logic, FL Studio) or export a WAV. The MIDI file routes each part to its own channel — bass on channel 0, pads on 1, arp on 2, and drums on the GM percussion channel 9 — so it loads cleanly with the right instruments. WAV export is rendered from the same in-app WebAudio engine (via an `OfflineAudioContext`), so the file matches the preview exactly.
+Export MIDI for any DAW (Ableton, Logic, FL Studio) or export a WAV. The MIDI file routes each part to its own channel — bass on channel 0, pads on 1, arp on 2, and drums on the GM percussion channel 9 — so it loads cleanly with the right instruments. WAV export is rendered by the same synthesis code you hear in-app (via an `OfflineAudioContext`).
 
 ### Explainability — Event Decision Card
 ![Decision Card](docs/screenshots/06-decision-card.png)
@@ -220,21 +220,24 @@ CNN-embedding classifier (AVP-LVT, 0.90 bar).
 ## Themes
 
 Themes define the **harmonic** personality of the output — the key, the chord
-progression, the bass motion, and the suggested tempo:
+progression, the bass motion — and the **sound**: the drum kit, the FX profile,
+and how the pads are played.
 
-| Theme | Key | Progression | Bass | Tempo |
-|-------|-----|------------|------|-------|
-| **Blade Runner** | D minor | Dm → Bb → F → C | Root–fifth | 80–100 BPM |
-| **Stranger Things** | C minor | Cm → Bb → Ab → Bb | Driving offbeat eighths | 100–120 BPM |
+| Theme | Key | Progression | Bass | Kit | FX | Suggested BPM |
+|-------|-----|------------|------|-----|----|----|
+| **Blade Runner** | D minor | Dm → Bb → F → C | Root–fifth | Synthwave (layered) | Gated reverb | 80–100 |
+| **Stranger Things** | C minor | Cm → Bb → Ab → Bb | Driving offbeat eighths | TR808-style | Dark filtered delay | 100–120 |
 
 The bass line follows the chord progression, pad chords resolve to the active
 triad, and arpeggios can be driven by your hi-hat rhythm (ArpDrive template).
 
-> **What a theme does and doesn't change:** switching theme changes the notes —
-> key, chords, bass pattern, tempo. It does **not** currently change the timbre:
-> both themes use the same synth voices and the same master reverb/delay bus (see
-> `src/audio/scheduleArrangement.ts`). Per-theme sound design (distinct pads, FX)
-> is modeled in the theme data but not yet wired into the synth.
+> **What a theme changes:** the notes (key, chord progression, bass pattern),
+> the default arrangement template, and the sound itself: each theme selects a
+> drum kit, an FX profile (per-instrument reverb/delay/chorus sends), and a pad
+> articulation. The mapping from theme to synth parameters lives in
+> `src/audio/timbre.ts`; the theme data lives in the Rust `Theme` struct. Tempo
+> is still estimated from your performance — `bpm_range` is a suggestion, not a
+> setting.
 
 ## Song Mode
 
