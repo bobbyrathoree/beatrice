@@ -103,8 +103,7 @@ function App() {
 
   // Audio playback
   const { isPlaying, currentTime, duration, play: playAudio, stop: stopAudio } = useAudioPlayback(
-    pipelineResult?.arrangement,
-    gridSettings.bpm
+    pipelineResult?.arrangement
   );
 
   // Stop playback when arrangement changes (after re-arrange)
@@ -1025,7 +1024,7 @@ function App() {
                   isPlaying={isPlaying}
                   currentTime={currentTime}
                   duration={duration}
-                  onPlay={() => playAudio(pipelineResult.arrangement, gridSettings.bpm)}
+                  onPlay={() => playAudio(pipelineResult.arrangement)}
                   onStop={stopAudio}
                   theme={selectedTheme}
                 />

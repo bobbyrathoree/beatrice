@@ -19,7 +19,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createFxBus, scheduleKick } from "./audio/scheduleArrangement";
+import { deriveTimbre, DEFAULT_SOUND } from "./audio/timbre";
 import { loadDetectorNode } from "./worklet/loadDetector";
+
+// The spike only fires kicks; a fixed default timbre (BLADE RUNNER @ 120bpm) is
+// all it needs to build the themed FX bus and voice the kick.
+const JAM_TIMBRE = deriveTimbre(DEFAULT_SOUND, 120);
 
 type Mode = "loopback" | "synthetic";
 
@@ -102,7 +107,7 @@ export default function JamSpike() {
         results.outputLatencyMs = (ctx.outputLatency ?? 0) * 1000;
         results.baseLatencyMs = (ctx.baseLatency ?? 0) * 1000;
 
-        const bus = createFxBus(ctx, ctx.destination);
+        const bus = createFxBus(ctx, ctx.destination, JAM_TIMBRE);
 
         // Detector node (shared verified loading path). Prints "ready".
         const node = await loadDetectorNode(ctx);
@@ -161,7 +166,7 @@ export default function JamSpike() {
           if (data.type !== "event") return;
           if (mode === "loopback") {
             // React to a real transient with a kick (the jam behaviour).
-            scheduleKick(ctx!, bus, ctx!.currentTime, 120);
+            scheduleKick(ctx!, bus, ctx!.currentTime, 120, JAM_TIMBRE.kick);
           }
           if (pendingEmitPerf !== null) {
             const detectMs = performance.now() - pendingEmitPerf;

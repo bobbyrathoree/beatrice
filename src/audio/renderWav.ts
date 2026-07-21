@@ -6,11 +6,19 @@
 // which rendered silence.
 
 import { createFxBus, scheduleArrangement } from "./scheduleArrangement";
+import { deriveTimbre, renderMetaFromArrangement } from "./timbre";
 import type { Arrangement } from "../types/ipc";
 
 /**
  * Render an arrangement to a 16-bit stereo PCM WAV file.
- * @param arrangement the arrangement to render (uses `total_duration_ms` for length)
+ *
+ * Self-contained: the theme's sound + bpm are read off the arrangement metadata
+ * (with legacy/fallback normalization) and turned into a full TimbreParams
+ * snapshot — the same one live playback uses — so what the user exports matches
+ * what they hear. The render length includes the derived FX/voice tail so the
+ * reverb and delay ring out fully instead of being truncated.
+ *
+ * @param arrangement the arrangement to render (uses `total_duration_ms` + tail for length)
  * @param sampleRate  output sample rate in Hz (default 44100)
  * @returns the WAV file bytes (RIFF/WAVE)
  */
@@ -18,10 +26,12 @@ export async function renderArrangementToWav(
   arrangement: Arrangement,
   sampleRate = 44100,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const durationSec = arrangement.total_duration_ms / 1000;
+  const { sound, bpm } = renderMetaFromArrangement(arrangement);
+  const timbre = deriveTimbre(sound, bpm);
+  const durationSec = arrangement.total_duration_ms / 1000 + timbre.fx.renderTailSec;
   const frames = Math.max(1, Math.ceil(durationSec * sampleRate));
   const ctx = new OfflineAudioContext(2, frames, sampleRate);
-  scheduleArrangement(ctx, createFxBus(ctx, ctx.destination), arrangement, 0);
+  scheduleArrangement(ctx, createFxBus(ctx, ctx.destination, timbre), arrangement, 0, timbre);
   const buf = await ctx.startRendering();
   return encodeWav16(buf);
 }
