@@ -162,7 +162,9 @@ const MOCK_THEMES = [
 
 // Descriptions copied verbatim from the Rust THEME_REGISTRY (themes/mod.rs). Kept
 // beside the themes (ThemeSummary carries them) rather than on Theme itself.
-const THEME_DESCRIPTIONS: Record<string, string> = {
+// Keyed by the MOCK_THEMES names so a future theme added without a description
+// fails tsc instead of silently rendering an empty string.
+const THEME_DESCRIPTIONS: Record<(typeof MOCK_THEMES)[number]['name'], string> = {
   'BLADE RUNNER':
     'D minor, i–VI–III–VII (Dm–Bb–F–C). Root-fifth bass, halftime groove. Layered synthwave kit, gated reverb, long sustained pads.',
   'STRANGER THINGS':
@@ -596,7 +598,7 @@ const HANDLERS: Record<string, Handler> = {
   list_themes: (): ThemeSummary[] =>
     MOCK_THEMES.map((t) => ({
       name: t.name,
-      description: THEME_DESCRIPTIONS[t.name] ?? '',
+      description: THEME_DESCRIPTIONS[t.name],
       bpm_range: t.bpm_range,
       root_note: t.root_note,
       scale_family: t.scale_family,

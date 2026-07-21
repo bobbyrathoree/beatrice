@@ -364,6 +364,10 @@ function fxRingSec(fx: FxBase): number {
 /**
  * PURE — no logging, no side effects. Maps a (validated) ThemeSound + bpm to the
  * full concrete DSP parameter set. bpm is clamped to [40, 300] (non-finite/<=0 → 120).
+ *
+ * The returned kick/snare/hihat/pad/arp params are SHARED module-level tables,
+ * not copies — treat them as read-only. Mutating them would corrupt every
+ * subsequent call's output.
  */
 export function deriveTimbre(sound: ThemeSound, bpm: number): TimbreParams {
   const clamped = clampBpm(bpm);
