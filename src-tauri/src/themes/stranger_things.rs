@@ -1,16 +1,18 @@
 // Stranger Things Theme
-// Synthwave horror: dark, pulsing, retro, Cm scale
+// Synthwave horror: dark, driving, retro, Cm scale
 
 use super::types::*;
+use crate::arranger::templates::ArrangementTemplate;
 
 /// Create the Stranger Things theme
 ///
 /// Characteristics:
 /// - C minor (60 = C) scale
-/// - Arpeggios and pulsing bass
-/// - 80s drums
+/// - Arp-led groove, driving offbeat bass
+/// - TR808-style kit, dark filtered delay
+/// - Short rhythmic pads (the envelope decays once and holds, it does not pulse)
 /// - BPM: 100-120
-/// - Dark, pulsing, retro
+/// - Dark, driving, retro
 /// - Chord progression: i - VII - VI - VII (Cm - Bb - Ab - Bb)
 pub fn stranger_things_theme() -> Theme {
     Theme {
@@ -25,10 +27,13 @@ pub fn stranger_things_theme() -> Theme {
         bass_pattern: BassPattern::OffbeatEighths,
         arp_pattern: ArpPattern::Up158,
         arp_octave_range: (0, 2),
-        drum_palette: DrumPalette::SynthwaveDrums,
-        fx_profile: FxProfile::DarkDelay,
-        synth_stab_velocity: 90,
-        pad_sustain: false, // More pulsing than sustained
+        default_template: ArrangementTemplate::ArpDrive,
+        sound: ThemeSound {
+            drum_palette: DrumPalette::TR808,
+            fx_profile: FxProfile::DarkDelay,
+            pad_sustain: false,
+        },
+        bass_stab_max_velocity: 90,
     }
 }
 
@@ -49,10 +54,11 @@ mod tests {
         assert_eq!(theme.bass_pattern, BassPattern::OffbeatEighths);
         assert_eq!(theme.arp_pattern, ArpPattern::Up158);
         assert_eq!(theme.arp_octave_range, (0, 2));
-        assert_eq!(theme.drum_palette, DrumPalette::SynthwaveDrums);
-        assert_eq!(theme.fx_profile, FxProfile::DarkDelay);
-        assert_eq!(theme.synth_stab_velocity, 90);
-        assert!(!theme.pad_sustain);
+        assert_eq!(theme.default_template, ArrangementTemplate::ArpDrive);
+        assert_eq!(theme.sound.drum_palette, DrumPalette::TR808);
+        assert_eq!(theme.sound.fx_profile, FxProfile::DarkDelay);
+        assert!(!theme.sound.pad_sustain);
+        assert_eq!(theme.bass_stab_max_velocity, 90);
 
         // Check chord progression
         assert_eq!(theme.chord_progression.chords.len(), 4);
@@ -129,10 +135,10 @@ mod tests {
         // Different bass patterns
         assert_ne!(st.bass_pattern, br.bass_pattern);
 
-        // Different FX profiles
-        assert_ne!(st.fx_profile, br.fx_profile);
+        // Distinct render-time sound identities (kit + FX + pad envelope)
+        assert_ne!(st.sound, br.sound);
 
-        // Different pad sustain
-        assert_ne!(st.pad_sustain, br.pad_sustain);
+        // Distinct default templates
+        assert_ne!(st.default_template, br.default_template);
     }
 }

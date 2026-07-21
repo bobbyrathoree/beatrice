@@ -2,13 +2,15 @@
 // Vangelis-inspired: melancholic, atmospheric, Dm scale
 
 use super::types::*;
+use crate::arranger::templates::ArrangementTemplate;
 
 /// Create the Blade Runner theme
 ///
 /// Characteristics:
 /// - D minor (62 = D) scale
-/// - Vangelis pads and brass stabs
-/// - Gated reverb
+/// - Layered synthwave kit, gated reverb
+/// - Long sustained pads (the envelope holds, not pulses)
+/// - Halftime groove, root-fifth bass
 /// - BPM: 80-100
 /// - Melancholic, atmospheric
 /// - Chord progression: i - VI - III - VII (Dm - Bb - F - C)
@@ -25,10 +27,13 @@ pub fn blade_runner_theme() -> Theme {
         bass_pattern: BassPattern::RootFifth,
         arp_pattern: ArpPattern::Up158,
         arp_octave_range: (-1, 1),
-        drum_palette: DrumPalette::SynthwaveDrums,
-        fx_profile: FxProfile::GatedReverb,
-        synth_stab_velocity: 100,
-        pad_sustain: true,
+        default_template: ArrangementTemplate::SynthwaveHalftime,
+        sound: ThemeSound {
+            drum_palette: DrumPalette::SynthwaveDrums,
+            fx_profile: FxProfile::GatedReverb,
+            pad_sustain: true,
+        },
+        bass_stab_max_velocity: 100,
     }
 }
 
@@ -47,10 +52,11 @@ mod tests {
         assert_eq!(theme.bass_pattern, BassPattern::RootFifth);
         assert_eq!(theme.arp_pattern, ArpPattern::Up158);
         assert_eq!(theme.arp_octave_range, (-1, 1));
-        assert_eq!(theme.drum_palette, DrumPalette::SynthwaveDrums);
-        assert_eq!(theme.fx_profile, FxProfile::GatedReverb);
-        assert_eq!(theme.synth_stab_velocity, 100);
-        assert!(theme.pad_sustain);
+        assert_eq!(theme.default_template, ArrangementTemplate::SynthwaveHalftime);
+        assert_eq!(theme.sound.drum_palette, DrumPalette::SynthwaveDrums);
+        assert_eq!(theme.sound.fx_profile, FxProfile::GatedReverb);
+        assert!(theme.sound.pad_sustain);
+        assert_eq!(theme.bass_stab_max_velocity, 100);
 
         // Check chord progression
         assert_eq!(theme.chord_progression.chords.len(), 4);

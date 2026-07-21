@@ -57,21 +57,29 @@ pub enum BassPattern {
     Walking,        // Walking bass line
 }
 
-/// Drum kit palettes
+/// Drum kit palettes — every variant must have a distinct implemented sound
+/// in the TS synth (src/audio/timbre.ts). Do not add variants without a DSP mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub enum DrumPalette {
-    SynthwaveDrums, // 80s electronic
-    AcousticKit,    // Natural drums
-    TR808,          // Classic 808
+    SynthwaveDrums, // layered 80s electronic (the original Beatrice kit)
+    TR808,          // analog-style: long boomy sine kick with pitch snap, snappy noise snare, tight metallic hat
 }
 
-/// Effects profiles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub enum FxProfile {
-    GatedReverb, // 80s gated reverb
-    WideChorus,  // Lush chorus
-    DarkDelay,   // Dark, ambient delay
-    Dry,         // No effects
+    GatedReverb, // 80s gated reverb: shaped IR truncated at the gate with a short fade
+    WideChorus,  // modulated stereo short delays on pad/arp
+    DarkDelay,   // filtered-feedback delay, heavier wet mix
+    Dry,         // wet paths bypassed
+}
+
+/// The render-time sound identity of a theme. Snapshot into every Arrangement
+/// so playback/export need no side-channel theme lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThemeSound {
+    pub drum_palette: DrumPalette,
+    pub fx_profile: FxProfile,
+    pub pad_sustain: bool, // true = long sustained pads; false = short rhythmic decay
 }
 
 /// Complete theme definition
@@ -85,16 +93,11 @@ pub struct Theme {
     pub bass_pattern: BassPattern,
     pub arp_pattern: ArpPattern,
     pub arp_octave_range: (i8, i8),      // e.g., (-1, 1) for 3 octaves
-    // NOTE: the four fields below are declared but NOT yet consumed by the
-    // WebAudio synth (scheduleArrangement.ts uses one fixed FX bus and one pad
-    // voice for every theme). They describe intended sound design that isn't
-    // wired up, so switching theme changes harmony/tempo — not timbre. Keep
-    // them so the data model is ready if/when per-theme synthesis lands; don't
-    // advertise theme-specific FX to users until it does.
-    pub drum_palette: DrumPalette,
-    pub fx_profile: FxProfile,
-    pub synth_stab_velocity: u8,         // Velocity for B-triggered synth
-    pub pad_sustain: bool,               // Long sustaining pads
+    pub default_template: crate::arranger::templates::ArrangementTemplate, // typed, not String
+    pub sound: ThemeSound,
+    /// Ceiling for B-triggered bass stab velocity (applied by the arranger:
+    /// source_velocity/127 * b_emphasis * this). Arrangement data, not timbre.
+    pub bass_stab_max_velocity: u8,
 }
 
 /// Theme summary for UI display
@@ -105,6 +108,7 @@ pub struct ThemeSummary {
     pub bpm_range: (u32, u32),
     pub root_note: u8,
     pub scale_family: ScaleFamily,
+    pub default_template: crate::arranger::templates::ArrangementTemplate,
 }
 
 impl Theme {
@@ -116,6 +120,7 @@ impl Theme {
             bpm_range: self.bpm_range,
             root_note: self.root_note,
             scale_family: self.scale_family,
+            default_template: self.default_template,
         }
     }
 
