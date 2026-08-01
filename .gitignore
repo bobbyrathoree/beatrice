@@ -51,3 +51,6 @@ CLAUDE.md
 # Rust build outputs (Cargo workspace uses a single root target/ dir)
 /target/
 crates/*/target/
+
+# Demo recording intermediates (the committed artifact is docs/demo.gif)
+docs/demo-recording/

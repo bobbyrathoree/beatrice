@@ -16,6 +16,13 @@ Beatrice is a desktop app that transforms beatbox performances into harmonically
 </p>
 
 <p align="center">
+  <img src="docs/demo.gif" alt="Beatrice: a beatbox clip detected, arranged into 16 bars, and re-voiced by switching theme" width="760">
+  <br>
+  <em>One beatbox clip → detected events → a 16-bar arrangement, re-voiced live by switching theme.<br>
+  Recorded from the real app (<code>scripts/record-demo.mjs</code>), not a mockup.</em>
+</p>
+
+<p align="center">
   <a href="https://bobbyrathoree.github.io/beatrice/"><strong>▶ Try the live demo</strong></a>
   &nbsp;·&nbsp; runs the full pipeline in your browser — click <strong>TRY DEMO</strong> and press play
 </p>
@@ -443,6 +450,19 @@ progression, and the composite `test-pattern.wav` the integration tests read).
 ```bash
 node scripts/generate-test-audio.mjs
 ```
+
+### Re-record the demo GIF
+The GIF at the top of this README is generated from the real app, so it can never
+drift from what Beatrice actually does. Playwright drives the browser-mock demo
+and records video; ffmpeg crops and palettizes it.
+```bash
+npm run build && npm run preview &   # serve at :1420
+npm run demo:record                  # → docs/demo-recording/demo.webm
+npm run demo:gif                     # → docs/demo.gif
+```
+The recorder asserts that each section it means to show is actually in frame and
+fails loudly otherwise — a silently-clipped GIF is worse than no GIF. Tunables
+live at the top of each script (`FPS`, `WIDTH`, `CROP`, `START`, `DURATION`).
 
 ## Architecture
 
