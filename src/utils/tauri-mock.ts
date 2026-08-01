@@ -143,6 +143,7 @@ const MOCK_THEMES = [
     arp_octave_range: [-1, 1],
     default_template: 'synthwave_halftime',
     sound: { drum_palette: 'SynthwaveDrums', fx_profile: 'GatedReverb', pad_sustain: true },
+    visuals: { accent_hex: '#FF6B00', emissive_hex: '#FF3300', card_hex: '#FF00FF' },
     bass_stab_max_velocity: 100,
   },
   {
@@ -156,7 +157,22 @@ const MOCK_THEMES = [
     arp_octave_range: [0, 2],
     default_template: 'arp_drive',
     sound: { drum_palette: 'TR808', fx_profile: 'DarkDelay', pad_sustain: false },
+    visuals: { accent_hex: '#FF0055', emissive_hex: '#FF0000', card_hex: '#00FF00' },
     bass_stab_max_velocity: 90,
+  },
+  {
+    name: 'TWIN PEAKS',
+    bpm_range: [60, 80],
+    root_note: 64, // E
+    scale_family: 'Dorian',
+    chord_progression: { chords: ['Im', 'IV', 'Im', 'VII'], bars_per_chord: 2 },
+    bass_pattern: 'Walking',
+    arp_pattern: 'Down851',
+    arp_octave_range: [0, 1],
+    default_template: 'synthwave_straight',
+    sound: { drum_palette: 'SynthwaveDrums', fx_profile: 'WideChorus', pad_sustain: true },
+    visuals: { accent_hex: '#7B4BFF', emissive_hex: '#B14BFF', card_hex: '#FFD400' },
+    bass_stab_max_velocity: 80,
   },
 ] satisfies Theme[];
 
@@ -169,6 +185,8 @@ const THEME_DESCRIPTIONS: Record<(typeof MOCK_THEMES)[number]['name'], string> =
     'D minor, i–VI–III–VII (Dm–Bb–F–C). Root-fifth bass, halftime groove. Layered synthwave kit, gated reverb, long sustained pads.',
   'STRANGER THINGS':
     'C minor, i–VII–VI–VII (Cm–Bb–Ab–Bb). Driving offbeat bass, arp-led groove. TR808-style kit, dark filtered delay, short rhythmic pads.',
+  'TWIN PEAKS':
+    'E Dorian, i–IV–i–VII (Em–A–Em–D). Walking bass, descending arp, slowest tempo. Layered kit, wide stereo chorus, long sustained pads.',
 };
 
 /** Resolve a theme by name (case-insensitive), BLADE RUNNER fallback like Rust. */
@@ -603,6 +621,7 @@ const HANDLERS: Record<string, Handler> = {
       root_note: t.root_note,
       scale_family: t.scale_family,
       default_template: t.default_template,
+      visuals: t.visuals,
     })),
 
   // get_theme mirrors the Rust command: an exact/case-insensitive miss returns

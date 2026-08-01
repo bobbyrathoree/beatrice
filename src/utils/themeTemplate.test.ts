@@ -15,6 +15,7 @@ function makeTheme(overrides: Partial<Theme>): Theme {
     arp_octave_range: [-1, 1],
     default_template: "synthwave_straight",
     sound: { drum_palette: "SynthwaveDrums", fx_profile: "GatedReverb", pad_sustain: true },
+    visuals: { accent_hex: "#FF6B00", emissive_hex: "#FF3300", card_hex: "#FF00FF" },
     bass_stab_max_velocity: 100,
     ...overrides,
   };

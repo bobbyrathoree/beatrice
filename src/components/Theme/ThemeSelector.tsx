@@ -66,17 +66,16 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
     return noteNames[midiNote % 12];
   };
 
-  // Get theme card color based on theme name
-  const getThemeColor = (themeName: string): string => {
-    switch (themeName.toUpperCase()) {
-      case 'BLADE RUNNER':
-        return '#FF00FF'; // Magenta for Blade Runner
-      case 'STRANGER THINGS':
-        return '#00FF00'; // Green for Stranger Things
-      default:
-        return '#00FFFF'; // Cyan for other themes
-    }
-  };
+  // Card colour comes from the theme's own curated `visuals` (Rust
+  // Theme.visuals, carried on ThemeSummary). This used to switch on theme NAME,
+  // so any newly registered theme silently rendered a generic cyan card. The
+  // fallback below applies only if a summary somehow arrives without visuals.
+  const getThemeColor = (theme: ThemeSummary): string =>
+    theme.visuals?.card_hex ?? '#00FFFF';
+
+  // The loaded summary for the active theme (the "ACTIVE THEME" swatch needs its
+  // visuals, and only the name is passed in as a prop).
+  const activeSummary = themes.find((t) => t.name === activeThemeName);
 
   if (loading) {
     return (
@@ -161,7 +160,7 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
       >
         {themes.map((theme) => {
           const isSelected = activeThemeName === theme.name;
-          const themeColor = getThemeColor(theme.name);
+          const themeColor = getThemeColor(theme);
 
           return (
             <motion.button
@@ -297,7 +296,7 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
               width: '12px',
               height: '12px',
               borderRadius: '50%',
-              backgroundColor: getThemeColor(activeThemeName),
+              backgroundColor: activeSummary ? getThemeColor(activeSummary) : '#00FFFF',
               border: '2px solid #000',
             }}
           />

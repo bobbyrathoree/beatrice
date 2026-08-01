@@ -262,9 +262,13 @@ and how the pads are played.
 |-------|-----|------------|------|-----|----|----|
 | **Blade Runner** | D minor | Dm → Bb → F → C | Root–fifth | Synthwave (layered) | Gated reverb | 80–100 |
 | **Stranger Things** | C minor | Cm → Bb → Ab → Bb | Driving offbeat eighths | TR808-style | Dark filtered delay | 100–120 |
+| **Twin Peaks** | E Dorian | Em → A → Em → D | Walking | Synthwave (layered) | Wide stereo chorus | 60–80 |
 
 The bass line follows the chord progression, pad chords resolve to the active
 triad, and arpeggios can be driven by your hi-hat rhythm (ArpDrive template).
+Twin Peaks is in **Dorian** — the major IV over a minor tonic is what makes it
+sound wistful rather than simply dark — and plays a walking bass with a
+descending arpeggio.
 
 > **What a theme changes:** the notes (key, chord progression, bass pattern),
 > the default arrangement template, and the sound itself: each theme selects a
@@ -273,6 +277,38 @@ triad, and arpeggios can be driven by your hi-hat rhythm (ArpDrive template).
 > `src/audio/timbre.ts`; the theme data lives in the Rust `Theme` struct. Tempo
 > is still estimated from your performance — `bpm_range` is a suggestion, not a
 > setting.
+
+<details>
+<summary><strong>Adding a theme</strong> — what the construct buys you</summary>
+
+Themes are data, not special cases. A new theme is one Rust file plus one
+registry line:
+
+```rust
+// src-tauri/src/themes/twin_peaks.rs
+Theme {
+    name: "TWIN PEAKS".to_string(),
+    scale_family: ScaleFamily::Dorian,
+    bass_pattern: BassPattern::Walking,
+    arp_pattern: ArpPattern::Down851,
+    default_template: ArrangementTemplate::SynthwaveStraight,
+    sound: ThemeSound { drum_palette: ..., fx_profile: FxProfile::WideChorus, pad_sustain: true },
+    visuals: ThemeVisuals { accent_hex: "#7B4BFF", ... },
+    ..
+}
+```
+
+Everything else follows: the arranger reads the harmony, `deriveTimbre` maps the
+sound enums to synth parameters through **exhaustive** tables, and the UI (theme
+cards, 3D scene) colours itself from `visuals`. Registry tests assert every theme
+is valid and that no two themes share a sound identity or accent colour, and an
+offline render test asserts every pair is *measurably* different audio.
+
+The type system enforces the contract: adding an enum variant in Rust without
+giving it a DSP mapping **fails `tsc`** rather than silently falling back to a
+default. That's deliberate — the previous version of this feature had four theme
+fields the synth ignored entirely.
+</details>
 
 ## Song Mode
 

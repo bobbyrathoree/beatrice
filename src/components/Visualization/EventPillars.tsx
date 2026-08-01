@@ -2,15 +2,18 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import type { Mesh } from 'three';
 import type { DetectedEvent } from '../../types/visualization';
+import type { ThemeVisuals } from '../../bindings';
+import { sceneColors } from './themeColors';
 
 interface EventPillarsProps {
   event: DetectedEvent;
-  theme: string;
+  /** The active theme's curated colours; undefined before summaries load. */
+  visuals?: ThemeVisuals | null;
 }
 
-export function EventPillars({ event, theme }: EventPillarsProps) {
+export function EventPillars({ event, visuals }: EventPillarsProps) {
   const meshRef = useRef<Mesh>(null);
-  const colors = getThemeColors(theme);
+  const colors = sceneColors(visuals);
 
   // Position based on event timestamp (normalized to scene width)
   const x = (event.timestamp_ms / 1000) * 2 - 5;  // Map to -5 to +5
@@ -35,13 +38,5 @@ export function EventPillars({ event, theme }: EventPillarsProps) {
   );
 }
 
-function getThemeColors(theme: string) {
-  switch (theme) {
-    case 'BLADE RUNNER':
-      return { primary: '#FF6B00', emissive: '#FF3300' };  // Orange/amber
-    case 'STRANGER THINGS':
-      return { primary: '#FF0055', emissive: '#FF0000' };  // Red/pink
-    default:
-      return { primary: '#00FFFF', emissive: '#0088FF' };  // Cyan
-  }
-}
+// Colours come from the theme's own `visuals` via the shared `sceneColors`
+// helper — this file used to carry a duplicate switch on theme NAME.

@@ -33,6 +33,13 @@ pub fn blade_runner_theme() -> Theme {
             fx_profile: FxProfile::GatedReverb,
             pad_sustain: true,
         },
+        // Orange/amber geometry, magenta card — the colours this theme has
+        // always rendered, now carried as data instead of hardcoded in the UI.
+        visuals: ThemeVisuals {
+            accent_hex: "#FF6B00".to_string(),
+            emissive_hex: "#FF3300".to_string(),
+            card_hex: "#FF00FF".to_string(),
+        },
         bass_stab_max_velocity: 100,
     }
 }

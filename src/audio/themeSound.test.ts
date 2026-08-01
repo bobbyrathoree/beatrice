@@ -44,6 +44,9 @@ beforeAll(async () => {
 // right before the boundary so tail-length differences show up in the render.
 const BR_SOUND: ThemeSound = { drum_palette: "SynthwaveDrums", fx_profile: "GatedReverb", pad_sustain: true };
 const ST_SOUND: ThemeSound = { drum_palette: "TR808", fx_profile: "DarkDelay", pad_sustain: false };
+// Third shipped theme: shares BR's kit, differs by FX profile (see the
+// registry-wide distinctness test at the bottom of this file).
+const TP_SOUND: ThemeSound = { drum_palette: "SynthwaveDrums", fx_profile: "WideChorus", pad_sustain: true };
 
 function note(timestamp_ms: number, duration_ms: number, velocity: number, midi_note: number | null = null) {
   return { timestamp_ms, duration_ms, velocity, midi_note, source_event_id: null };
@@ -100,6 +103,7 @@ let st!: Uint8Array;
 let darkDelay!: Uint8Array;
 let chorus!: Uint8Array;
 let dry!: Uint8Array;
+let twinPeaks!: Uint8Array;
 
 beforeAll(async () => {
   const { renderArrangementToWav } = await import("./renderWav");
@@ -112,6 +116,7 @@ beforeAll(async () => {
   darkDelay = await renderArrangementToWav(fixture({ ...BR_SOUND, fx_profile: "DarkDelay" }, "DARK DELAY"), SR);
   chorus = await renderArrangementToWav(fixture({ ...BR_SOUND, fx_profile: "WideChorus" }, "WIDE CHORUS"), SR);
   dry = await renderArrangementToWav(fixture({ ...BR_SOUND, fx_profile: "Dry" }, "DRY"), SR);
+  twinPeaks = await renderArrangementToWav(fixture(TP_SOUND, "TWIN PEAKS"), SR);
 
   // Write audition WAVs for a human listener; log their paths.
   mkdirSync(AUDITION_DIR, { recursive: true });
@@ -232,5 +237,39 @@ describe("theme sounds differ measurably (A/B)", () => {
     // MEASURED dry tail energy[4.2,4.9] = 0.0000 vs GatedReverb = 119.24: Dry has
     // essentially no tail. Assert < 0.2 * the reverb render's tail energy.
     expect(eDry).toBeLessThan(0.2 * eGated);
+  });
+
+  // Every SHIPPED theme must be audibly distinct from every other shipped one.
+  // The tests above prove individual FX profiles differ; this one guards the
+  // actual product claim ("switching theme changes the sound") across the whole
+  // registry, so adding a theme that merely re-skins an existing sound fails.
+  it("every shipped theme sound is mutually distinguishable", () => {
+    const sounds: [string, Uint8Array][] = [
+      ["BLADE RUNNER", brA],
+      ["STRANGER THINGS", st],
+      ["TWIN PEAKS", twinPeaks],
+    ];
+
+    for (let i = 0; i < sounds.length; i++) {
+      for (let j = i + 1; j < sounds.length; j++) {
+        const [nameA, wavA] = sounds[i];
+        const [nameB, wavB] = sounds[j];
+        const a = wavToMono(wavA);
+        const b = wavToMono(wavB);
+        const len = Math.max(a.length, b.length);
+        const delta = l1Sum(
+          bandProportions(padTo(a, len), SR),
+          bandProportions(padTo(b, len), SR),
+        );
+        console.log(`[registry] ${nameA} vs ${nameB}: band l1Sum = ${delta.toFixed(4)}`);
+        // MEASURED band l1Sum: BR↔ST 0.3651, ST↔TP 0.2872, BR↔TP 0.0782.
+        // BR↔TP is the tightest pair by design — they share the Synthwave kit and
+        // differ by FX profile (GatedReverb vs WideChorus, whose signature is
+        // stereo width rather than spectral balance) plus tempo/harmony. Floor is
+        // ~half that tightest margin, so a genuinely duplicate sound still fails.
+        // (Width is asserted separately in chorus_is_wide_and_dry_is_not.)
+        expect(delta).toBeGreaterThan(0.04);
+      }
+    }
   });
 });

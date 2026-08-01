@@ -82,6 +82,24 @@ pub struct ThemeSound {
     pub pad_sustain: bool, // true = long sustained pads; false = short rhythmic decay
 }
 
+/// The on-screen identity of a theme — the visual counterpart to `ThemeSound`.
+///
+/// Curated per theme and carried in the theme data so the UI never has to
+/// switch on theme NAME: before this existed, three components each held their
+/// own `match theme { "BLADE RUNNER" => ..., _ => cyan }`, so any new theme
+/// silently rendered a generic default. Every field is a `#RRGGBB` string
+/// (validated by the registry test).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThemeVisuals {
+    /// Primary colour of the reactive 3D geometry and event pillars.
+    pub accent_hex: String,
+    /// Emissive/glow colour paired with `accent_hex`.
+    pub emissive_hex: String,
+    /// Theme-selector card colour (kept separate: cards need contrast against
+    /// the neo-brutalist white background, the 3D scene sits on black).
+    pub card_hex: String,
+}
+
 /// Complete theme definition
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct Theme {
@@ -95,6 +113,7 @@ pub struct Theme {
     pub arp_octave_range: (i8, i8),      // e.g., (-1, 1) for 3 octaves
     pub default_template: crate::arranger::templates::ArrangementTemplate, // typed, not String
     pub sound: ThemeSound,
+    pub visuals: ThemeVisuals,
     /// Ceiling for B-triggered bass stab velocity (applied by the arranger:
     /// source_velocity/127 * b_emphasis * this). Arrangement data, not timbre.
     pub bass_stab_max_velocity: u8,
@@ -109,6 +128,9 @@ pub struct ThemeSummary {
     pub root_note: u8,
     pub scale_family: ScaleFamily,
     pub default_template: crate::arranger::templates::ArrangementTemplate,
+    /// Carried on the summary so the theme selector and 3D scene can colour
+    /// themselves from theme data (they only ever load summaries).
+    pub visuals: ThemeVisuals,
 }
 
 impl Theme {
@@ -121,6 +143,7 @@ impl Theme {
             root_note: self.root_note,
             scale_family: self.scale_family,
             default_template: self.default_template,
+            visuals: self.visuals.clone(),
         }
     }
 

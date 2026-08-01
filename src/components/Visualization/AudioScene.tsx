@@ -5,11 +5,13 @@ import { ParticleField } from './ParticleField';
 import { EventPillars } from './EventPillars';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import type { DetectedEvent } from '../../types/visualization';
+import type { ThemeVisuals } from '../../bindings';
 
 interface AudioSceneProps {
   audioLevel: number;      // 0-1 current audio level
   events: DetectedEvent[]; // Events for visualization
-  theme: string;           // Current theme for colors
+  /** Active theme's curated colours (from Theme.visuals); null before load. */
+  visuals?: ThemeVisuals | null;
   isProcessing: boolean;   // Show processing state
   progress: number;        // Processing progress 0-1
 }
@@ -17,7 +19,7 @@ interface AudioSceneProps {
 export function AudioScene({
   audioLevel,
   events,
-  theme,
+  visuals,
   isProcessing,
   progress
 }: AudioSceneProps) {
@@ -28,10 +30,10 @@ export function AudioScene({
       <ambientLight intensity={0.5} />
       <pointLight position={[10, 10, 10]} />
 
-      <ReactiveGeometry audioLevel={audioLevel} theme={theme} />
+      <ReactiveGeometry audioLevel={audioLevel} visuals={visuals} />
       <ParticleField events={events} />
       {events.filter(e => e.class === 'BilabialPlosive').map((e, i) => (
-        <EventPillars key={i} event={e} theme={theme} />
+        <EventPillars key={i} event={e} visuals={visuals} />
       ))}
 
       {isProcessing && <ProcessingIndicator progress={progress} />}

@@ -708,7 +708,7 @@ phase_offset_ms: number }
 /**
  * Complete theme definition
  */
-export type Theme = { name: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily; chord_progression: ChordProgression; bass_pattern: BassPattern; arp_pattern: ArpPattern; arp_octave_range: [number, number]; default_template: ArrangementTemplate; sound: ThemeSound; 
+export type Theme = { name: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily; chord_progression: ChordProgression; bass_pattern: BassPattern; arp_pattern: ArpPattern; arp_octave_range: [number, number]; default_template: ArrangementTemplate; sound: ThemeSound; visuals: ThemeVisuals; 
 /**
  * Ceiling for B-triggered bass stab velocity (applied by the arranger:
  * source_velocity/127 * b_emphasis * this). Arrangement data, not timbre.
@@ -722,7 +722,35 @@ export type ThemeSound = { drum_palette: DrumPalette; fx_profile: FxProfile; pad
 /**
  * Theme summary for UI display
  */
-export type ThemeSummary = { name: string; description: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily; default_template: ArrangementTemplate }
+export type ThemeSummary = { name: string; description: string; bpm_range: [number, number]; root_note: number; scale_family: ScaleFamily; default_template: ArrangementTemplate; 
+/**
+ * Carried on the summary so the theme selector and 3D scene can colour
+ * themselves from theme data (they only ever load summaries).
+ */
+visuals: ThemeVisuals }
+/**
+ * The on-screen identity of a theme — the visual counterpart to `ThemeSound`.
+ * 
+ * Curated per theme and carried in the theme data so the UI never has to
+ * switch on theme NAME: before this existed, three components each held their
+ * own `match theme { "BLADE RUNNER" => ..., _ => cyan }`, so any new theme
+ * silently rendered a generic default. Every field is a `#RRGGBB` string
+ * (validated by the registry test).
+ */
+export type ThemeVisuals = { 
+/**
+ * Primary colour of the reactive 3D geometry and event pillars.
+ */
+accent_hex: string; 
+/**
+ * Emissive/glow colour paired with `accent_hex`.
+ */
+emissive_hex: string; 
+/**
+ * Theme-selector card colour (kept separate: cards need contrast against
+ * the neo-brutalist white background, the 3D scene sits on black).
+ */
+card_hex: string }
 export type UpdateCalibrationProfileInput = { id: string; name: string | null; notes: string | null }
 export type UpdateRunStatusInput = { run_id: string; status: string }
 

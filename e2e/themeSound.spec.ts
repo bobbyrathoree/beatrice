@@ -134,3 +134,62 @@ test("theme switch changes the exported audio (notes, template, and timbre toget
 
   expect(errors).toEqual([]);
 });
+
+// The construct's real claim is that a theme added as DATA works end-to-end with
+// no UI changes. TWIN PEAKS was added after the pipeline/synth/UI were written,
+// so driving it through the real browser is the proof: it must arrange (canonical
+// name lands on the card), render distinct audio, and colour itself from its own
+// `visuals` rather than the old generic cyan fallback.
+test("a theme added as data works end-to-end (arranges, sounds different, colours itself)", async ({
+  page,
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+
+  await page.goto("http://localhost:1420");
+  await page.getByRole("button", { name: /TRY DEMO/ }).click();
+  await expect(page.getByRole("button", { name: /PLAY/ })).toBeVisible({ timeout: 15000 });
+
+  // The theme selector lists every registered theme — including ones it has no
+  // hardcoded knowledge of.
+  await expect(page.getByText("TWIN PEAKS", { exact: false }).first()).toBeVisible();
+
+  await selectThemeAndSettle(page, "TWIN PEAKS");
+  const wavTp = await exportWav(page, testInfo, "twin-peaks");
+
+  await selectThemeAndSettle(page, "STRANGER THINGS");
+  const wavSt = await exportWav(page, testInfo, "stranger-things-vs-tp");
+
+  expect(wavTp.length).toBeGreaterThan(44 + 44100);
+  const tpDelta = l1Sum(
+    bandProportions(wavToMono(wavTp), SAMPLE_RATE),
+    bandProportions(wavToMono(wavSt), SAMPLE_RATE),
+  );
+  // eslint-disable-next-line no-console
+  console.log(`[theme-3] l1Sum(bandProportions TP, ST) = ${tpDelta.toFixed(4)} (floor 0.04)`);
+  expect(tpDelta).toBeGreaterThan(0.04);
+
+  // Its card is coloured from Theme.visuals.card_hex (#FFD400), NOT the generic
+  // cyan (#00FFFF) the old name-switch would have produced for an unknown theme.
+  await selectThemeAndSettle(page, "TWIN PEAKS");
+  const cardColors = await page
+    .getByText("TWIN PEAKS", { exact: false })
+    .first()
+    .evaluate((el) => {
+      // Walk up to the card button and collect the colours it renders with.
+      const card = el.closest("button") ?? el;
+      const found: string[] = [];
+      card.querySelectorAll("*").forEach((n) => {
+        const s = getComputedStyle(n as Element);
+        found.push(s.backgroundColor, s.borderColor, s.color);
+      });
+      const own = getComputedStyle(card as Element);
+      found.push(own.backgroundColor, own.borderColor, own.color);
+      return found;
+    });
+  // #FFD400 → rgb(255, 212, 0)
+  expect(cardColors.some((c) => c.replace(/\s/g, "") === "rgb(255,212,0)")).toBe(true);
+  expect(cardColors.some((c) => c.replace(/\s/g, "") === "rgb(0,255,255)")).toBe(false);
+
+  expect(errors).toEqual([]);
+});

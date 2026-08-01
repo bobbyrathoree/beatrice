@@ -33,6 +33,13 @@ pub fn stranger_things_theme() -> Theme {
             fx_profile: FxProfile::DarkDelay,
             pad_sustain: false,
         },
+        // Red/pink geometry, green card — the colours this theme has always
+        // rendered, now carried as data instead of hardcoded in the UI.
+        visuals: ThemeVisuals {
+            accent_hex: "#FF0055".to_string(),
+            emissive_hex: "#FF0000".to_string(),
+            card_hex: "#00FF00".to_string(),
+        },
         bass_stab_max_velocity: 90,
     }
 }

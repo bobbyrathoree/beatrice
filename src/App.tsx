@@ -1028,7 +1028,7 @@ function App() {
                 <AudioScene
                   audioLevel={audioLevel}
                   events={[]}
-                  theme={pipelineParams.theme}
+                  visuals={selectedTheme?.visuals}
                   isProcessing={true}
                   progress={processingProgress}
                 />

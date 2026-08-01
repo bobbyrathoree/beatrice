@@ -1,17 +1,19 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import type { Mesh } from 'three';
+import type { ThemeVisuals } from '../../bindings';
+import { sceneColors } from './themeColors';
 
 interface ReactiveGeometryProps {
   audioLevel: number;
-  theme: string;
+  /** The active theme's curated colours; undefined before summaries load. */
+  visuals?: ThemeVisuals | null;
 }
 
-export function ReactiveGeometry({ audioLevel, theme }: ReactiveGeometryProps) {
+export function ReactiveGeometry({ audioLevel, visuals }: ReactiveGeometryProps) {
   const meshRef = useRef<Mesh>(null);
 
-  // Get theme colors
-  const colors = getThemeColors(theme);
+  const colors = sceneColors(visuals);
 
   useFrame(() => {
     if (meshRef.current) {
@@ -35,13 +37,6 @@ export function ReactiveGeometry({ audioLevel, theme }: ReactiveGeometryProps) {
   );
 }
 
-function getThemeColors(theme: string) {
-  switch (theme) {
-    case 'BLADE RUNNER':
-      return { primary: '#FF6B00', emissive: '#FF3300' };  // Orange/amber
-    case 'STRANGER THINGS':
-      return { primary: '#FF0055', emissive: '#FF0000' };  // Red/pink
-    default:
-      return { primary: '#00FFFF', emissive: '#0088FF' };  // Cyan
-  }
-}
+// Colours come from the theme's own `visuals` (see themeColors) — this file used
+// to switch on theme NAME, which silently rendered generic cyan for any theme
+// the switch didn't know about.
