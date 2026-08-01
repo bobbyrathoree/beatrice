@@ -214,8 +214,43 @@ SOTA (≈0.90); the classical "MFCC + kNN ≈ 0.84" lineage number is boxeme-wis
 on a different split, so it is not directly comparable to our participant-wise
 protocol. Snare remains the hardest class (65.8% recall — snare imitations
 genuinely overlap hi-hats in timbre), and HumVoiced is unmeasurable on AVP by
-construction. The remaining ~8-point gap to SOTA is the roadmap's
-CNN-embedding classifier (AVP-LVT, 0.90 bar).
+construction.
+
+### The CNN that didn't make the cut
+
+The obvious way to close the gap to SOTA is a learned embedding classifier, so
+we built one and pre-registered a bar it had to clear before it could replace
+the Gaussian. **It missed, so it isn't shipped.** The training code is public in
+[`training/`](training/) — see [training/README.md](training/README.md) for the
+full protocol and results.
+
+The short version: a ~34K-parameter depthwise-separable CNN, trained on
+AVP + AVP-LVT (40 development participants) with 5-shot cosine-prototype
+adaptation, evaluated by **nested out-of-fold** cross-validation (5 outer folds
+× 3 seeds, adaptation strength tuned only on inner folds).
+
+| | Pre-registered bar | Best CNN | Shipping Gaussian |
+|---|---|---|---|
+| Pooled 5-shot macro accuracy | ≥ 0.900 | **0.828** | 0.811 |
+| Worst per-class recall | ≥ 0.800 | snare **0.732** | — |
+
+The CNN beat the Gaussian by ~1.7 points (bootstrap lower-95 **+0.045**, so the
+edge is real, not noise) — but nowhere near the 0.900 bar, and snare recall was
+the binding constraint. Two honest conclusions:
+
+- **We never opened the held-out test set.** Four AVP and four LVT participants
+  were locked away before training and enforced in code. The gate failed on
+  development data, so the test set stays sealed for a future attempt — a
+  failed model doesn't get to go fishing for a better number.
+- **The 0.900 bar may itself be miscalibrated.** The published ≈0.899 comes from
+  participant-specific fine-tuning of a much larger model on a different split,
+  not 5-shot adaptation under nested OOF. Our shipping Gaussian scores 0.811 on
+  this harder protocol — so 0.900 is likely the wrong yardstick for this regime.
+  Recalibrating a pre-registered bar after seeing the results is a judgement
+  call, not a statistical one, so the bar and the failure both stand as recorded.
+
+Total spend: ~$5.65 of GPU time. Next iteration, if there is one, attacks snare
+specifically and uses the 300 ms crop that won the input-contract ablation.
 
 ## Themes
 
