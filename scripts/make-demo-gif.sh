@@ -12,23 +12,22 @@ set -euo pipefail
 
 IN="${1:-docs/demo-recording/demo.webm}"
 OUT="${2:-docs/demo.gif}"
-# 10fps still reads as motion; the crop below is tall (a 940x1700 region), so
-# frame area — not frame rate — dominates the file size. 760px keeps the GIF
-# comfortably under GitHub's inline-render limit while staying legible.
-FPS="${FPS:-10}"
-WIDTH="${WIDTH:-760}"
+# 12fps reads as smooth motion; the crop is now a normal 816x740 region rather
+# than a tall strip, so the frames are far cheaper and we can afford both a
+# higher frame rate and the full duration.
+FPS="${FPS:-12}"
+WIDTH="${WIDTH:-800}"
 
-# The recording is 1000x3000 (see record-demo.mjs for why it must be tall). Crop
-# to the band that tells the story — transport + event timeline + arrangement
-# lanes + theme cards — dropping the tall tail of groove/export controls.
-# Format: w:h:x:y against the 1000x3000 source.
-CROP="${CROP:-940:1700:30:60}"
+# The recording is 1280x800. Crop to the app column (it is centred, with empty
+# margins either side) and drop the page chrome above it.
+# Format: w:h:x:y against the 1280x800 source.
+CROP="${CROP:-816:740:232:60}"
 
 # Trim: drop the landing screen at the head and most of the playback tail. The
 # playhead sweep is nice but repetitive, and GIF size scales with frame COUNT ×
 # frame AREA — this crop is deliberately tall, so duration is the lever.
-START="${START:-3.0}"
-DURATION="${DURATION:-12}"
+START="${START:-1.5}"
+DURATION="${DURATION:-24}"
 
 if [[ ! -f "$IN" ]]; then
   echo "input video not found: $IN (run: node scripts/record-demo.mjs)" >&2

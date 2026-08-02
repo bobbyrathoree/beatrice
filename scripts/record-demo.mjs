@@ -17,15 +17,12 @@ import { join } from "node:path";
 const URL = process.env.DEMO_URL ?? "http://localhost:1420";
 const OUT_DIR = "docs/demo-recording";
 
-// Deliberately TALL viewport. The results screen centres its content in a fixed
-// flex column, so at laptop heights the waveform and arrangement lanes render
-// ABOVE the visible area and no amount of scrolling reaches them (scrollIntoView
-// and container scrollTop both no-op — measured). Recording tall puts the whole
-// story on screen at once, which also means the GIF needs no scrolling: a still
-// camera reads far better than a panning one at 12fps. make-demo-gif.sh crops to
-// the interesting band.
-const WIDTH = 1000; // app column occupies ~100..900 at this width
-const HEIGHT = 3000;
+// A normal laptop viewport. (This used to be 1000x3000 to work around a layout
+// bug where results content above the scroll origin was unreachable; that bug is
+// fixed — see the .results-scroll region in brutalist.css — so the recording now
+// uses a realistic window and scrolls like a user would.)
+const WIDTH = 1280;
+const HEIGHT = 800;
 
 // Beat pauses (ms). Tuned so the GIF reads as a story, not a seizure.
 const BEAT = { settle: 900, read: 1600, play: 5200 };
@@ -47,6 +44,26 @@ const step = async (label, fn, pause = BEAT.settle) => {
   process.stdout.write(`· ${label}\n`);
   await fn();
   await page.waitForTimeout(pause);
+};
+
+/** Scroll the results region so `label` sits near the top of the frame. Works on
+ *  `.results-scroll` (the dedicated scroll region) and reads as a camera move. */
+const frame = async (label) => {
+  await page.evaluate((l) => {
+    const scroller = document.querySelector(".results-scroll") ?? document.querySelector("main");
+    const node = document.evaluate(
+      `//*[contains(text(),'${l}')]`,
+      document,
+      null,
+      XPathResult.FIRST_ORDERED_NODE_TYPE,
+      null,
+    ).singleNodeValue;
+    if (!scroller || !node) return;
+    const delta =
+      node.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 24;
+    scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: "smooth" });
+  }, label);
+  await page.waitForTimeout(800); // let the smooth scroll settle
 };
 
 /** Assert an element is actually visible in frame — a silently-clipped GIF is
@@ -80,25 +97,32 @@ await step("try demo → pipeline runs", async () => {
   await page.getByRole("button", { name: /PLAY/ }).waitFor({ timeout: 20000 });
 }, BEAT.read);
 
-// Everything below must be on screen simultaneously — verify, don't assume.
-await assertInFrame("EVENT TIMELINE");
-await assertInFrame("SONG ARRANGEMENT");
-await assertInFrame("TWIN PEAKS");
+// The waveform is the first thing on the results screen now, so it's already in
+// frame — verify rather than assume.
+await assertInFrame("B-SOUNDS");
 
-// Theme switches, with the arrangement lanes in shot the whole time so the
-// viewer sees the notes re-voice — that's the claim the theme system makes.
+// Pan down through the story: detected events → the generated arrangement.
+await step("frame the event timeline", () => frame("EVENT TIMELINE"), BEAT.read);
+await step("frame the arrangement", () => frame("SONG ARRANGEMENT"), BEAT.read);
+await assertInFrame("SONG ARRANGEMENT");
+
+// Theme switches. Re-frame the arrangement after each click so the lanes stay in
+// shot and the viewer sees the notes re-voice — the claim the theme system makes.
 for (const theme of ["STRANGER THINGS", "TWIN PEAKS", "BLADE RUNNER"]) {
   await step(`theme → ${theme}`, async () => {
     await page.getByText(theme, { exact: false }).first().click();
     await page
       .locator(`[data-arrangement-theme="${theme}"]`)
       .waitFor({ timeout: 15000 });
+    await frame("SONG ARRANGEMENT");
   }, BEAT.read);
 }
 
-// Play: the playhead sweeps the transport and the Song Mode HUD steps through
-// INTRO → BUILD → DROP.
+// Play: the transport is pinned above the scroll region, so the playhead sweep
+// and the Song Mode HUD stepping INTRO → BUILD → DROP stay visible wherever the
+// scroll happens to be.
 await step("play", async () => {
+  await frame("EVENT TIMELINE");
   await page.getByRole("button", { name: /PLAY/ }).click();
 }, BEAT.play);
 
