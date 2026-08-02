@@ -11,8 +11,12 @@ interface SessionSidebarProps {
   refreshKey?: number;
 }
 
+const COMPACT_SIDEBAR_QUERY = "(max-width: 1100px)";
+
 export function SessionSidebar({ onSessionSelect, onRunSelect, refreshKey }: SessionSidebarProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(
+    () => window.matchMedia(COMPACT_SIDEBAR_QUERY).matches,
+  );
   const { projects, loading, error, refresh } = useProjects();
   const { currentProject, currentRun } = useStore();
 
@@ -20,6 +24,15 @@ export function SessionSidebar({ onSessionSelect, onRunSelect, refreshKey }: Ses
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [projectRuns, setProjectRuns] = useState<Record<string, Run[]>>({});
   const [loadingRuns, setLoadingRuns] = useState<string | null>(null);
+
+  useEffect(() => {
+    const compactViewport = window.matchMedia(COMPACT_SIDEBAR_QUERY);
+    const collapseForCompactViewport = (event: MediaQueryListEvent) => {
+      if (event.matches) setIsCollapsed(true);
+    };
+    compactViewport.addEventListener("change", collapseForCompactViewport);
+    return () => compactViewport.removeEventListener("change", collapseForCompactViewport);
+  }, []);
 
   // Refresh projects when refreshKey changes
   useEffect(() => {
@@ -122,6 +135,7 @@ export function SessionSidebar({ onSessionSelect, onRunSelect, refreshKey }: Ses
         className="sidebar-toggle"
         onClick={() => setIsCollapsed(!isCollapsed)}
         aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-expanded={!isCollapsed}
       >
         <span className="toggle-icon">{isCollapsed ? "▶" : "◀"}</span>
       </button>

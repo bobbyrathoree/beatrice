@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { EventDecision, EVENT_CLASS_NAMES, EVENT_CLASS_COLORS } from '../../types/explainability';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ModelInspector } from './ModelInspector';
 import type { EventClass } from '../../bindings';
 
@@ -11,15 +11,45 @@ interface DecisionCardProps {
 
 export function DecisionCard({ event, onClose }: DecisionCardProps) {
   const [showModelInspector, setShowModelInspector] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Close on Escape key
   useEffect(() => {
     if (!event) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) {
+        e.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    closeButtonRef.current?.focus();
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      previouslyFocused?.focus();
+    };
   }, [event, onClose]);
 
   if (!event) return null;
@@ -62,6 +92,11 @@ export function DecisionCard({ event, onClose }: DecisionCardProps) {
         }}
       >
         <motion.div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="decision-card-title"
+          tabIndex={-1}
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.9, opacity: 0 }}
@@ -86,10 +121,13 @@ export function DecisionCard({ event, onClose }: DecisionCardProps) {
               justifyContent: 'space-between',
               alignItems: 'center',
               backgroundColor: '#F8F8F8',
+              position: 'sticky',
+              top: 0,
+              zIndex: 2,
             }}
           >
             <div>
-              <h3 style={{
+              <h3 id="decision-card-title" style={{
                 margin: 0,
                 fontSize: '20px',
                 fontWeight: 'bold',
@@ -107,6 +145,9 @@ export function DecisionCard({ event, onClose }: DecisionCardProps) {
               </div>
             </div>
             <motion.button
+              ref={closeButtonRef}
+              type="button"
+              aria-label="Close event decision"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               onClick={onClose}

@@ -37,6 +37,7 @@ src-tauri/target/
 test-results/
 playwright-report/
 .playwright-cli/
+output/
 
 # Test recordings and generated test audio
 test-recording.wav

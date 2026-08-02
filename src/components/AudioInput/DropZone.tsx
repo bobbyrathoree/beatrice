@@ -127,6 +127,16 @@ export function DropZone({ onProjectCreated, onError }: DropZoneProps) {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       onClick={handleClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleClick();
+        }
+      }}
+      role="button"
+      tabIndex={isProcessing ? -1 : 0}
+      aria-label="Upload a WAV file"
+      aria-disabled={isProcessing}
       animate={{
         scale: isDragOver ? 1.02 : 1,
         borderColor: isDragOver ? '#FF00FF' : '#000000',

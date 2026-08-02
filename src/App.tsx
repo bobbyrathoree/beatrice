@@ -38,6 +38,7 @@ import { mapThemeNameToTemplate, templateForTheme } from "./utils/themeTemplate"
 import "./styles/brutalist.css";
 
 type AppState = "input" | "recording" | "jam" | "processing" | "results";
+const MIN_PROCESSING_DISPLAY_MS = 700;
 
 // Map a selected theme to an arrangement template name. Prefers the theme's own
 // typed `default_template` (Rust source of truth), falling back to the name map
@@ -212,6 +213,7 @@ function App() {
     }
 
     const effectiveTheme = themeOverride !== undefined ? themeOverride : selectedTheme;
+    const pipelineStartedAt = performance.now();
 
     setIsPipelineRunning(true);
     setProcessingProgress(0);
@@ -324,6 +326,12 @@ function App() {
         tempo: tempoResult,
         duration_ms: _project.duration_ms,
       });
+
+      const remainingProcessingTime =
+        MIN_PROCESSING_DISPLAY_MS - (performance.now() - pipelineStartedAt);
+      if (remainingProcessingTime > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remainingProcessingTime));
+      }
 
       // Transition to results
       setState("results");
@@ -850,13 +858,14 @@ function App() {
     <div className="app">
       {/* Header */}
       <header className="header">
-        <h1
+        <button
+          type="button"
           className="logo logo-home-button"
           onClick={handleNewRecording}
-          title="Return to home"
+          aria-label="Return to home"
         >
           BEATRICE
-        </h1>
+        </button>
         {state === "recording" && <span className="rec-indicator">● REC</span>}
       </header>
 
@@ -1058,133 +1067,135 @@ function App() {
                 />
               )}
 
-              {/* Waveform Display */}
-              <Waveform
-                audioData={audioData || undefined}
-                duration={pipelineResult?.duration_ms ?? 10000}
-                events={eventDecisions}
-              />
+              <div className="results-scroll">
+                {/* Waveform Display */}
+                <Waveform
+                  audioData={audioData || undefined}
+                  duration={pipelineResult?.duration_ms ?? 10000}
+                  events={eventDecisions}
+                />
 
-              {/* B-Sound Markers */}
-              <BeatMarkers
-                events={eventDecisions}
-                duration={pipelineResult?.duration_ms ?? 10000}
-                onMarkerClick={(event) => setSelectedEventId(event.event_id)}
-              />
+                {/* B-Sound Markers */}
+                <BeatMarkers
+                  events={eventDecisions}
+                  duration={pipelineResult?.duration_ms ?? 10000}
+                  onMarkerClick={(event) => setSelectedEventId(event.event_id)}
+                />
 
-              {/* Event Timeline */}
-              {pipelineResult?.events && pipelineResult.events.length > 0 && (
+                {/* Event Timeline */}
+                {pipelineResult?.events && pipelineResult.events.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.15 }}
+                  >
+                    <Timeline
+                      events={eventDecisions}
+                      onEventClick={handleEventClick}
+                      arrangedNotes={arrangedNotes}
+                      maxDuration={pipelineResult.arrangement?.total_duration_ms || undefined}
+                    />
+                  </motion.div>
+                )}
+
+                {/* Arrangement Visualizer */}
+                {pipelineResult?.arrangement && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.18 }}
+                  >
+                    <ArrangementLanes
+                      arrangement={pipelineResult.arrangement}
+                      currentTime={currentTime}
+                      isPlaying={isPlaying}
+                    />
+                  </motion.div>
+                )}
+
+                {/* Theme Selector */}
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.15 }}
+                  transition={{ delay: 0.2 }}
                 >
-                  <Timeline
-                    events={eventDecisions}
-                    onEventClick={handleEventClick}
-                    arrangedNotes={arrangedNotes}
-                    maxDuration={pipelineResult.arrangement?.total_duration_ms || undefined}
-                  />
-                </motion.div>
-              )}
-
-              {/* Arrangement Visualizer */}
-              {pipelineResult?.arrangement && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.18 }}
-                >
-                  <ArrangementLanes
-                    arrangement={pipelineResult.arrangement}
-                    currentTime={currentTime}
-                    isPlaying={isPlaying}
-                  />
-                </motion.div>
-              )}
-
-              {/* Theme Selector */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-              >
-                <ThemeSelector
-                  onThemeChange={handleThemeChange}
-                  activeThemeName={selectedTheme?.name || pipelineParams.theme}
-                  disabled={false}
-                />
-              </motion.div>
-
-              {/* Groove Controls */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-              >
-                <GrooveControls
-                  tempoEstimate={pipelineResult?.tempo ?? null}
-                  onGridChange={handleGridChange}
-                  onQuantizeChange={handleQuantizeChange}
-                />
-              </motion.div>
-
-              {/* B-Emphasis Slider */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 }}
-              >
-                <BEmphasisSlider
-                  value={pipelineParams.bEmphasis}
-                  onChange={handleBEmphasisChange}
-                  disabled={false}
-                />
-              </motion.div>
-
-              {/* Fidelity Slider — PRODUCE FOR ME <-> FOLLOW ME */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.45 }}
-              >
-                <FidelitySlider
-                  value={pipelineParams.fidelity}
-                  onChange={handleFidelityChange}
-                  disabled={false}
-                />
-              </motion.div>
-
-              {/* Export Controls */}
-              {pipelineResult && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.5 }}
-                >
-                  <ExportControls
-                    arrangement={pipelineResult.arrangement}
-                    gridSettings={gridSettings}
-                    themeName={selectedTheme?.name || pipelineParams.theme}
-                    phaseOffsetMs={pipelineResult.tempo?.phase_offset_ms ?? 0}
+                  <ThemeSelector
+                    onThemeChange={handleThemeChange}
+                    activeThemeName={selectedTheme?.name || pipelineParams.theme}
                     disabled={false}
                   />
                 </motion.div>
-              )}
 
-              {/* New Recording Button */}
-              <motion.button
-                className="btn btn-large"
-                onClick={handleNewRecording}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.6 }}
-                whileHover={{ scale: 1.02, y: -2 }}
-                whileTap={{ scale: 0.98 }}
-                style={{ width: "100%" }}
-              >
-                ↺ NEW RECORDING
-              </motion.button>
+                {/* Groove Controls */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                >
+                  <GrooveControls
+                    tempoEstimate={pipelineResult?.tempo ?? null}
+                    onGridChange={handleGridChange}
+                    onQuantizeChange={handleQuantizeChange}
+                  />
+                </motion.div>
+
+                {/* B-Emphasis Slider */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                >
+                  <BEmphasisSlider
+                    value={pipelineParams.bEmphasis}
+                    onChange={handleBEmphasisChange}
+                    disabled={false}
+                  />
+                </motion.div>
+
+                {/* Fidelity Slider — PRODUCE FOR ME <-> FOLLOW ME */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.45 }}
+                >
+                  <FidelitySlider
+                    value={pipelineParams.fidelity}
+                    onChange={handleFidelityChange}
+                    disabled={false}
+                  />
+                </motion.div>
+
+                {/* Export Controls */}
+                {pipelineResult && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 }}
+                  >
+                    <ExportControls
+                      arrangement={pipelineResult.arrangement}
+                      gridSettings={gridSettings}
+                      themeName={selectedTheme?.name || pipelineParams.theme}
+                      phaseOffsetMs={pipelineResult.tempo?.phase_offset_ms ?? 0}
+                      disabled={false}
+                    />
+                  </motion.div>
+                )}
+
+                {/* New Recording Button */}
+                <motion.button
+                  className="btn btn-large"
+                  onClick={handleNewRecording}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.6 }}
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                  style={{ width: "100%" }}
+                >
+                  ↺ NEW RECORDING
+                </motion.button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

@@ -217,8 +217,10 @@ export function Timeline({ events, onEventClick, maxDuration, arrangedNotes }: T
                 const opacity = 0.4 + (event.confidence * 0.6);
 
                 return (
-                  <motion.div
+                  <motion.button
                     key={event.event_id}
+                    type="button"
+                    aria-label={`Open ${event.class} decision at ${formatTime(event.timestamp_ms)}`}
                     data-testid="timeline-input-marker"
                     initial={{ scale: 0, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
@@ -228,7 +230,7 @@ export function Timeline({ events, onEventClick, maxDuration, arrangedNotes }: T
                     title={`Detected ${event.class} @ ${formatTime(event.timestamp_ms)}`}
                     style={{
                       position: 'absolute',
-                      left: `${position}%`,
+                      left: `clamp(${size / 2}px, ${position}%, calc(100% - ${size / 2}px))`,
                       top: '50%',
                       transform: 'translate(-50%, -50%)',
                       width: `${size}px`,
@@ -238,6 +240,8 @@ export function Timeline({ events, onEventClick, maxDuration, arrangedNotes }: T
                       borderRadius: '50%',
                       opacity,
                       cursor: 'pointer',
+                      appearance: 'none',
+                      padding: 0,
                       boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
                     }}
                   />
@@ -277,8 +281,11 @@ export function Timeline({ events, onEventClick, maxDuration, arrangedNotes }: T
                   const position = (note.timestamp_ms / duration) * 100;
                   const color = note.class ? EVENT_CLASS_COLORS[note.class] : '#999';
                   return (
-                    <motion.div
+                    <motion.button
                       key={`note-${i}`}
+                      type="button"
+                      disabled={!note.source_event_id}
+                      aria-label={`${note.lane_name} note at ${formatTime(note.timestamp_ms)}`}
                       data-testid="timeline-output-marker"
                       initial={{ scale: 0, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
@@ -290,7 +297,7 @@ export function Timeline({ events, onEventClick, maxDuration, arrangedNotes }: T
                       title={`${note.lane_name} @ ${formatTime(note.timestamp_ms)}`}
                       style={{
                         position: 'absolute',
-                        left: `${position}%`,
+                        left: `clamp(5px, ${position}%, calc(100% - 5px))`,
                         top: '50%',
                         transform: 'translate(-50%, -50%)',
                         width: '10px',
@@ -299,6 +306,8 @@ export function Timeline({ events, onEventClick, maxDuration, arrangedNotes }: T
                         border: '2px solid #000',
                         borderRadius: '2px',
                         cursor: note.source_event_id ? 'pointer' : 'default',
+                        appearance: 'none',
+                        padding: 0,
                         boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
                       }}
                     />

@@ -174,7 +174,7 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
                 borderRadius: '8px',
                 padding: '20px',
                 backgroundColor: isSelected ? themeColor : '#FFFFFF',
-                color: isSelected ? '#FFFFFF' : '#000',
+                color: '#000',
                 textAlign: 'left',
                 cursor: disabled ? 'not-allowed' : 'pointer',
                 display: 'flex',
@@ -250,7 +250,7 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
                 {/* BPM Range */}
                 <div
                   style={{
-                    border: isSelected ? '2px solid #FFFFFF' : '2px solid #000',
+                    border: '2px solid #000',
                     borderRadius: '4px',
                     padding: '4px 8px',
                     backgroundColor: isSelected ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.05)',
@@ -262,7 +262,7 @@ export function ThemeSelector({ onThemeChange, activeThemeName, disabled = false
                 {/* Root Note */}
                 <div
                   style={{
-                    border: isSelected ? '2px solid #FFFFFF' : '2px solid #000',
+                    border: '2px solid #000',
                     borderRadius: '4px',
                     padding: '4px 8px',
                     backgroundColor: isSelected ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.05)',

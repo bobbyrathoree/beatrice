@@ -93,6 +93,11 @@ body {
 }
 
 .logo-home-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
   transition: all var(--transition-fast);
   user-select: none;
@@ -131,10 +136,14 @@ body {
 .main {
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: var(--space-lg);
   overflow-y: auto;
+}
+
+.main > * {
+  margin-block: auto;
 }
 
 /* ==================== TYPOGRAPHY ==================== */
@@ -336,13 +345,38 @@ input[type="range"]::-moz-range-thumb {
 /* ==================== STATE CONTAINERS ==================== */
 .input-container,
 .recording-container,
-.processing-container,
-.results-container {
+.processing-container {
   width: 100%;
   max-width: 800px;
   display: flex;
   flex-direction: column;
   gap: var(--space-xl);
+}
+
+.results-container {
+  align-self: stretch;
+  width: 100%;
+  max-width: 800px;
+  min-height: 0;
+  margin-block: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.results-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  padding: var(--space-xs) var(--space-sm) var(--space-sm) var(--space-xs);
+}
+
+.results-scroll > * {
+  flex-shrink: 0;
 }
 
 /* Input State - Old Layout (Deprecated) */
@@ -744,6 +778,9 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: var(--shadow-large);
   z-index: 1000;
   animation: slideDown 0.3s ease;
+  width: min(640px, calc(100% - (2 * var(--space-md))));
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 @keyframes slideDown {
@@ -1261,7 +1298,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* Responsive adjustments */
-@media (max-width: 768px) {
+@media (max-width: 1100px) {
   .session-sidebar {
     position: absolute;
     left: 0;
@@ -1269,6 +1306,7 @@ input[type="range"]::-moz-range-thumb {
     height: 100%;
     z-index: 200;
     box-shadow: var(--shadow-large);
+    overflow: visible;
   }
 
   .session-sidebar.collapsed {
@@ -1293,9 +1331,9 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
-  position: sticky;
-  top: 0;
-  z-index: 50;
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
 }
 
 .playback-row {

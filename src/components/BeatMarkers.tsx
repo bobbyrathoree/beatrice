@@ -97,8 +97,10 @@ export function BeatMarkers({ events, duration, onMarkerClick }: BeatMarkersProp
           const isHovered = hoveredId === event.event_id;
 
           return (
-            <motion.div
+            <motion.button
               key={event.event_id}
+              type="button"
+              aria-label={`Open B-sound decision at ${formatTime(event.quantized_timestamp_ms)}`}
               initial={{ scale: 0, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{
@@ -111,10 +113,12 @@ export function BeatMarkers({ events, duration, onMarkerClick }: BeatMarkersProp
               whileTap={{ scale: 0.95 }}
               onMouseEnter={() => setHoveredId(event.event_id)}
               onMouseLeave={() => setHoveredId(null)}
+              onFocus={() => setHoveredId(event.event_id)}
+              onBlur={() => setHoveredId(null)}
               onClick={() => onMarkerClick(event)}
               style={{
                 position: 'absolute',
-                left: position + '%',
+                left: `clamp(16px, ${position}%, calc(100% - 16px))`,
                 top: '50%',
                 transform: 'translate(-50%, -50%)',
                 width: '32px',
@@ -126,6 +130,8 @@ export function BeatMarkers({ events, duration, onMarkerClick }: BeatMarkersProp
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
+                appearance: 'none',
+                padding: 0,
                 boxShadow: isHovered ? '0 4px 12px rgba(255, 0, 255, 0.5)' : '2px 2px 0 0 #000',
                 zIndex: isHovered ? 10 : 1,
               }}
@@ -173,7 +179,7 @@ export function BeatMarkers({ events, duration, onMarkerClick }: BeatMarkersProp
                   </motion.div>
                 )}
               </AnimatePresence>
-            </motion.div>
+            </motion.button>
           );
         })}
       </div>
